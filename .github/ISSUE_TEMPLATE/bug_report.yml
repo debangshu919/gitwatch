@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not paste tokens, webhook URLs, or encryption keys. Do not report a vulnerability here. Read SECURITY.md and contact the maintainer privately.
+        Do not paste tokens, webhook URLs, or encryption keys. Do not report a vulnerability here. Read SECURITY.md and report through https://debangshu.dev.
   - type: textarea
     id: what-happened
     attributes:
