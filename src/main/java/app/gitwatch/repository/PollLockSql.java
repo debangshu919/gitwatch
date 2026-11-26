@@ -2,8 +2,7 @@ package app.gitwatch.repository;
 
 public final class PollLockSql {
 
-    private PollLockSql() {
-    }
+    private PollLockSql() {}
 
     public static String statement(int batch, String nowParam) {
         if (batch < 1 || batch > 100) {

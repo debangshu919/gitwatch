@@ -15,7 +15,8 @@ public class RepoPollStateRepositoryImpl implements RepoPollStateRepositoryCusto
     @Override
     @SuppressWarnings("unchecked")
     public List<Object[]> lockDueKeys(Instant now, int batch) {
-        return entityManager.createNativeQuery(PollLockSql.statement(batch, ":now"))
+        return entityManager
+                .createNativeQuery(PollLockSql.statement(batch, ":now"))
                 .setParameter("now", OffsetDateTime.ofInstant(now, ZoneOffset.UTC))
                 .getResultList();
     }

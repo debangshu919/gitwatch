@@ -21,7 +21,5 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
               and r.active = true
             """)
     List<Subscription> findActiveForRepoEvent(
-            @Param("owner") String owner,
-            @Param("repo") String repo,
-            @Param("eventType") String eventType);
+            @Param("owner") String owner, @Param("repo") String repo, @Param("eventType") String eventType);
 }

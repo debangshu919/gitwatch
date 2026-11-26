@@ -11,5 +11,4 @@ public record DeliveryTarget(
         boolean channelActive,
         String webhookUrl,
         String eventType,
-        List<String> requiredLabels) {
-}
+        List<String> requiredLabels) {}

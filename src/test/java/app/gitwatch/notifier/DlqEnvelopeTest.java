@@ -27,8 +27,9 @@ class DlqEnvelopeTest {
     void deliveryFailureAndListenerFailureShareOneShape() throws Exception {
         GitHubEvent event = event();
         RecordingSender sender = new RecordingSender();
-        new KafkaDlqPublisher(sender, mapper).publish(
-                new DeliveryFailure(event, "22222222-2222-2222-2222-222222222222", "Discord returned 400", NOW));
+        new KafkaDlqPublisher(sender, mapper)
+                .publish(new DeliveryFailure(
+                        event, "22222222-2222-2222-2222-222222222222", "Discord returned 400", NOW));
 
         JsonNode delivery = mapper.readTree(sender.value);
         assertEquals(KafkaTopics.NOTIFICATIONS_DLQ, sender.topic);
@@ -39,7 +40,9 @@ class DlqEnvelopeTest {
         String raw = EventJson.write(mapper, event);
         sender.value = null;
         new NotificationDlqRecoverer(sender, mapper, Clock.fixed(NOW, ZoneOffset.UTC))
-                .accept(new ConsumerRecord<>(KafkaTopics.GITHUB_EVENTS, 0, 0L, "apache/iggy", raw), new IllegalStateException("listener failed"));
+                .accept(
+                        new ConsumerRecord<>(KafkaTopics.GITHUB_EVENTS, 0, 0L, "apache/iggy", raw),
+                        new IllegalStateException("listener failed"));
 
         JsonNode recovered = mapper.readTree(sender.value);
         assertEquals(KafkaTopics.NOTIFICATIONS_DLQ, sender.topic);
@@ -54,7 +57,9 @@ class DlqEnvelopeTest {
     void unreadableListenerPayloadStillUsesTheEnvelope() throws Exception {
         RecordingSender sender = new RecordingSender();
         new NotificationDlqRecoverer(sender, mapper, Clock.fixed(NOW, ZoneOffset.UTC))
-                .accept(new ConsumerRecord<>(KafkaTopics.GITHUB_EVENTS, 0, 0L, null, "not-json"), new IllegalArgumentException("failed to decode github event"));
+                .accept(
+                        new ConsumerRecord<>(KafkaTopics.GITHUB_EVENTS, 0, 0L, null, "not-json"),
+                        new IllegalArgumentException("failed to decode github event"));
 
         JsonNode recovered = mapper.readTree(sender.value);
         assertEnvelope(recovered, null, "failed to decode github event");

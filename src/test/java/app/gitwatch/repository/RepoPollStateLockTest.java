@@ -47,13 +47,30 @@ class RepoPollStateLockTest {
             insertSubscription(connection, userId, dueRepo, channelId, true);
             insertSubscription(connection, userId, futureRepo, channelId, true);
             insertSubscription(connection, userId, inactiveRepo, channelId, false);
-            insertPoll(connection, "apache", "iggy", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
-            insertPoll(connection, "apache", "later", OffsetDateTime.now(ZoneOffset.UTC).plusHours(1));
-            insertPoll(connection, "apache", "paused", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
-            insertPoll(connection, "apache", "nosub", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+            insertPoll(
+                    connection,
+                    "apache",
+                    "iggy",
+                    OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+            insertPoll(
+                    connection,
+                    "apache",
+                    "later",
+                    OffsetDateTime.now(ZoneOffset.UTC).plusHours(1));
+            insertPoll(
+                    connection,
+                    "apache",
+                    "paused",
+                    OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+            insertPoll(
+                    connection,
+                    "apache",
+                    "nosub",
+                    OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
         }
 
-        try (Connection first = open(); Connection second = open()) {
+        try (Connection first = open();
+                Connection second = open()) {
             first.setAutoCommit(false);
             second.setAutoCommit(false);
             try (var statement = second.createStatement()) {
@@ -83,8 +100,7 @@ class RepoPollStateLockTest {
     }
 
     private void insertUser(Connection connection, UUID id) throws Exception {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO users (id, email) VALUES (?, ?)")) {
+        try (PreparedStatement statement = connection.prepareStatement("INSERT INTO users (id, email) VALUES (?, ?)")) {
             statement.setObject(1, id);
             statement.setString(2, id + "@example.invalid");
             statement.executeUpdate();
@@ -111,7 +127,8 @@ class RepoPollStateLockTest {
         }
     }
 
-    private void insertSubscription(Connection connection, UUID userId, UUID repoId, UUID channelId, boolean active) throws Exception {
+    private void insertSubscription(Connection connection, UUID userId, UUID repoId, UUID channelId, boolean active)
+            throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO subscriptions (id, user_id, repo_id, channel_id, event_type, filters, is_active) VALUES (?, ?, ?, ?, 'issue.opened', '{}'::jsonb, ?)")) {
             statement.setObject(1, UUID.randomUUID());
@@ -123,7 +140,8 @@ class RepoPollStateLockTest {
         }
     }
 
-    private void insertPoll(Connection connection, String owner, String repo, OffsetDateTime nextPollAt) throws Exception {
+    private void insertPoll(Connection connection, String owner, String repo, OffsetDateTime nextPollAt)
+            throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO repo_poll_state (owner, repo, next_poll_at) VALUES (?, ?, ?)")) {
             statement.setString(1, owner);

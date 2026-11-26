@@ -14,5 +14,4 @@ public record GitHubEvent(
         List<String> labels,
         String url,
         @JsonProperty("body_excerpt") String bodyExcerpt,
-        @JsonProperty("created_at") Instant createdAt) {
-}
+        @JsonProperty("created_at") Instant createdAt) {}

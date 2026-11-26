@@ -9,7 +9,6 @@ import app.gitwatch.service.LabelFilter;
 import app.gitwatch.service.SubscriptionLookup;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -39,7 +38,15 @@ public class NotificationService {
             DlqPublisher dlq,
             Clock clock,
             AppProperties properties) {
-        this(subscriptions, discord, logs, dlq, clock, Sleeper.thread(), properties.getNotifier().getMaxAttempts(), properties.getNotifier().getBackoff());
+        this(
+                subscriptions,
+                discord,
+                logs,
+                dlq,
+                clock,
+                Sleeper.thread(),
+                properties.getNotifier().getMaxAttempts(),
+                properties.getNotifier().getBackoff());
     }
 
     public NotificationService(

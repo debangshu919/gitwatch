@@ -6,8 +6,7 @@ import java.util.Set;
 
 public final class LabelFilter {
 
-    private LabelFilter() {
-    }
+    private LabelFilter() {}
 
     public static boolean matches(List<String> required, List<String> actual) {
         if (required == null || required.isEmpty()) {

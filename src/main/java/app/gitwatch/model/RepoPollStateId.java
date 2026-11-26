@@ -14,8 +14,7 @@ public class RepoPollStateId implements Serializable {
     @Column(name = "repo", nullable = false)
     private String repo;
 
-    public RepoPollStateId() {
-    }
+    public RepoPollStateId() {}
 
     public RepoPollStateId(String owner, String repo) {
         this.owner = owner;

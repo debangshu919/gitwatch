@@ -9,8 +9,7 @@ public final class ChannelSecrets {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private ChannelSecrets() {
-    }
+    private ChannelSecrets() {}
 
     public static String write(ChannelConfig config) {
         if (config == null) {

@@ -12,7 +12,8 @@ class HealthControllerTest {
 
     @Test
     void healthIsUp() throws Exception {
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HealthController()).build();
+        MockMvc mockMvc =
+                MockMvcBuilders.standaloneSetup(new HealthController()).build();
         mockMvc.perform(get("/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));

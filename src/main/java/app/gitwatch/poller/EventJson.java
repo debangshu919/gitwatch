@@ -7,8 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 public final class EventJson {
 
-    private EventJson() {
-    }
+    private EventJson() {}
 
     public static ObjectMapper mapper() {
         ObjectMapper mapper = new ObjectMapper();

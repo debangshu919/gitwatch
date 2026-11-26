@@ -7,13 +7,17 @@ import java.util.List;
 
 public final class DiscordMessageFormatter {
 
-    private DiscordMessageFormatter() {
-    }
+    private DiscordMessageFormatter() {}
 
     public static String format(GitHubEvent event) {
         String kind = EventTypes.PR_OPENED.equals(event.eventType()) ? "New Pull Request" : "New Issue";
         StringBuilder body = new StringBuilder();
-        body.append("🟢 ").append(kind).append(" in ").append(event.owner()).append("/").append(event.repo());
+        body.append("🟢 ")
+                .append(kind)
+                .append(" in ")
+                .append(event.owner())
+                .append("/")
+                .append(event.repo());
         body.append("\n\n");
         body.append("#").append(event.number()).append(" – ").append(event.title());
         body.append("\n");

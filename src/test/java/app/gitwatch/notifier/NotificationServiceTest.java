@@ -65,10 +65,9 @@ class NotificationServiceTest {
         dlq = new MemoryDlq();
         sleeper = new RecordingSleeper();
         DiscordClient discord = new DiscordClient(
-                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build(),
-                mapper,
-                Duration.ofSeconds(2));
-        service = new NotificationService(lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build(), mapper, Duration.ofSeconds(2));
+        service = new NotificationService(
+                lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
     }
 
     @AfterEach
@@ -87,7 +86,9 @@ class NotificationServiceTest {
         service.handle(issue(List.of("good first issue", "help wanted")));
         assertEquals(1, calls.get());
         assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
-        assertEquals(specContent(EventTypes.ISSUE_OPENED, List.of("good first issue", "help wanted")), content(bodies.get(0)));
+        assertEquals(
+                specContent(EventTypes.ISSUE_OPENED, List.of("good first issue", "help wanted")),
+                content(bodies.get(0)));
     }
 
     @Test
@@ -124,7 +125,9 @@ class NotificationServiceTest {
     void discordPayloadMatchesFormat() throws Exception {
         lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
         service.handle(issue(List.of("good first issue", "help wanted")));
-        assertEquals(specContent(EventTypes.ISSUE_OPENED, List.of("good first issue", "help wanted")), content(bodies.get(0)));
+        assertEquals(
+                specContent(EventTypes.ISSUE_OPENED, List.of("good first issue", "help wanted")),
+                content(bodies.get(0)));
         assertFalse(bodies.get(0).contains("telegram"));
     }
 
@@ -217,7 +220,14 @@ class NotificationServiceTest {
     void oneInvalidWebhookDoesNotBlockOtherSubscribers() {
         UUID otherSubscription = UUID.fromString("44444444-4444-4444-4444-444444444444");
         lookup.targets.add(new DeliveryTarget(
-                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
+                USER_ID,
+                SUBSCRIPTION_ID,
+                CHANNEL_ID,
+                "discord",
+                true,
+                "not a url",
+                EventTypes.ISSUE_OPENED,
+                List.of()));
         lookup.targets.add(new DeliveryTarget(
                 USER_ID,
                 otherSubscription,
@@ -241,16 +251,21 @@ class NotificationServiceTest {
 
     @Test
     void thrownDeliveryDoesNotBlockTheNextSubscriber() {
-        DiscordClient discord = new DiscordClient(
-                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build(), mapper, Duration.ofSeconds(2)) {
-            @Override
-            public DiscordResponse post(String webhookUrl, String content) {
-                if (webhookUrl.contains("bad.example")) {
-                    throw new IllegalStateException("channel config is not readable");
-                }
-                return super.post(webhookUrl, content);
-            }
-        };
+        DiscordClient discord =
+                new DiscordClient(
+                        HttpClient.newBuilder()
+                                .version(HttpClient.Version.HTTP_1_1)
+                                .build(),
+                        mapper,
+                        Duration.ofSeconds(2)) {
+                    @Override
+                    public DiscordResponse post(String webhookUrl, String content) {
+                        if (webhookUrl.contains("bad.example")) {
+                            throw new IllegalStateException("channel config is not readable");
+                        }
+                        return super.post(webhookUrl, content);
+                    }
+                };
         service = new NotificationService(
                 lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
         UUID otherSubscription = UUID.fromString("55555555-5555-5555-5555-555555555555");
@@ -286,7 +301,14 @@ class NotificationServiceTest {
     void unrecordedFailureIsNotAcknowledged() {
         logs.failWrites = true;
         lookup.targets.add(new DeliveryTarget(
-                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
+                USER_ID,
+                SUBSCRIPTION_ID,
+                CHANNEL_ID,
+                "discord",
+                true,
+                "not a url",
+                EventTypes.ISSUE_OPENED,
+                List.of()));
         lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
 
         assertThrows(IllegalStateException.class, () -> service.handle(issue(List.of())));
@@ -297,7 +319,14 @@ class NotificationServiceTest {
     @Test
     void invalidWebhookIsPermanentAndDoesNotCallDiscord() {
         lookup.targets.add(new DeliveryTarget(
-                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
+                USER_ID,
+                SUBSCRIPTION_ID,
+                CHANNEL_ID,
+                "discord",
+                true,
+                "not a url",
+                EventTypes.ISSUE_OPENED,
+                List.of()));
         service.handle(issue(List.of()));
         assertEquals(0, calls.get());
         assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
@@ -361,7 +390,9 @@ class NotificationServiceTest {
         @Override
         public List<DeliveryTarget> findActive(String owner, String repo, String eventType) {
             seenTypes.add(eventType);
-            return targets.stream().filter(target -> target.eventType().equals(eventType)).toList();
+            return targets.stream()
+                    .filter(target -> target.eventType().equals(eventType))
+                    .toList();
         }
     }
 

@@ -14,10 +14,9 @@ public class RedisDedupStore implements DedupStore {
 
     @Override
     public boolean tryStart(String owner, String repo, String eventType, int number) {
-        Boolean stored = redis.opsForValue().setIfAbsent(
-                DedupKeys.key(owner, repo, eventType, number),
-                DedupKeys.IN_FLIGHT_VALUE,
-                DedupKeys.IN_FLIGHT);
+        Boolean stored = redis.opsForValue()
+                .setIfAbsent(
+                        DedupKeys.key(owner, repo, eventType, number), DedupKeys.IN_FLIGHT_VALUE, DedupKeys.IN_FLIGHT);
         return Boolean.TRUE.equals(stored);
     }
 
@@ -28,10 +27,8 @@ public class RedisDedupStore implements DedupStore {
 
     @Override
     public void complete(String owner, String repo, String eventType, int number) {
-        redis.opsForValue().set(
-                DedupKeys.key(owner, repo, eventType, number),
-                DedupKeys.COMPLETED_VALUE,
-                DedupKeys.TTL);
+        redis.opsForValue()
+                .set(DedupKeys.key(owner, repo, eventType, number), DedupKeys.COMPLETED_VALUE, DedupKeys.TTL);
     }
 
     @Override

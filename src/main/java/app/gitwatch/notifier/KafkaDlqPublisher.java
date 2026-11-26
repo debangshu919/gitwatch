@@ -19,12 +19,7 @@ public class KafkaDlqPublisher implements DlqPublisher {
     @Override
     public void publish(DeliveryFailure failure) {
         String body = DlqEnvelope.write(
-                mapper,
-                failure.event(),
-                null,
-                failure.subscriptionId(),
-                failure.error(),
-                failure.failedAt());
+                mapper, failure.event(), null, failure.subscriptionId(), failure.error(), failure.failedAt());
         try {
             sender.send(KafkaTopics.NOTIFICATIONS_DLQ, failure.subscriptionId(), body);
         } catch (RuntimeException ex) {

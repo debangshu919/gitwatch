@@ -12,7 +12,8 @@ class NotificationWorkerTest {
 
     @Test
     void listensOnGithubEventsAndDelegates() throws Exception {
-        KafkaListener listener = NotificationWorker.class.getMethod("onEvent", String.class).getAnnotation(KafkaListener.class);
+        KafkaListener listener =
+                NotificationWorker.class.getMethod("onEvent", String.class).getAnnotation(KafkaListener.class);
         assertEquals(KafkaTopics.GITHUB_EVENTS, listener.topics()[0]);
 
         CapturingService service = new CapturingService();
