@@ -402,6 +402,68 @@ class NotificationServiceTest {
     }
 
     @Test
+    void failedDeliveryCheckpointAfterAcceptDoesNotRepost() {
+        deliveries.failWrites = true;
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+        GitHubEvent event = issue(List.of());
+
+        service.handle(event);
+        service.handle(event);
+
+        assertEquals(1, calls.get());
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
+        assertTrue(dlq.failures.isEmpty());
+    }
+
+    @Test
+    void failedDeliveryCheckpointDoesNotRepostWhenASiblingIsThrottled() {
+        deliveries.failWrites = true;
+        UUID paced = UUID.fromString("66666666-6666-6666-6666-666666666666");
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                if (request.getPath().contains("slow")) {
+                    return new MockResponse().setResponseCode(429).setHeader("Retry-After", "60");
+                }
+                return new MockResponse().setResponseCode(204);
+            }
+        });
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true,
+                server.url("/ok").toString(), EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, paced, CHANNEL_ID, "discord", true,
+                server.url("/slow").toString(), EventTypes.ISSUE_OPENED, List.of()));
+        GitHubEvent event = issue(List.of());
+
+        assertThrows(DiscordThrottleException.class, () -> service.handle(event));
+        assertThrows(DiscordThrottleException.class, () -> service.handle(event));
+
+        assertEquals(3, calls.get());
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
+        assertTrue(dlq.failures.isEmpty());
+    }
+
+    @Test
+    void failedTerminalCheckpointDoesNotReplayTheWebhook() {
+        deliveries.failWrites = true;
+        nextStatus = 400;
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+        GitHubEvent event = issue(List.of());
+
+        service.handle(event);
+        service.handle(event);
+
+        assertEquals(1, calls.get());
+        assertEquals(1, dlq.failures.size());
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
+    }
+
+    @Test
     void secondHandleDoesNotPostAgainAfterDiscordAccepted() {
         lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
         GitHubEvent event = issue(List.of());
@@ -640,6 +702,7 @@ class NotificationServiceTest {
         private final Set<String> delivered = new HashSet<>();
         private final Set<String> failed = new HashSet<>();
         private boolean failReads;
+        private boolean failWrites;
 
         @Override
         public boolean tryStart(String owner, String repo, String eventType, int number) {
@@ -671,6 +734,9 @@ class NotificationServiceTest {
 
         @Override
         public void markDelivered(String subscriptionId, String eventType, int number) {
+            if (failWrites) {
+                throw new IllegalStateException("redis down");
+            }
             delivered.add(DedupKeys.deliveredKey(subscriptionId, eventType, number));
         }
 
@@ -684,6 +750,9 @@ class NotificationServiceTest {
 
         @Override
         public void markFailed(String subscriptionId, String eventType, int number) {
+            if (failWrites) {
+                throw new IllegalStateException("redis down");
+            }
             failed.add(DedupKeys.failedKey(subscriptionId, eventType, number));
         }
     }

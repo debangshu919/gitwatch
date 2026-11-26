@@ -4,6 +4,7 @@ import app.gitwatch.config.AppProperties;
 import app.gitwatch.model.GitHubEvent;
 import app.gitwatch.model.NotificationLog;
 import app.gitwatch.service.ChannelPolicy;
+import app.gitwatch.service.DedupKeys;
 import app.gitwatch.service.DedupStore;
 import app.gitwatch.service.DeliveryTarget;
 import app.gitwatch.service.LabelFilter;
@@ -11,7 +12,9 @@ import app.gitwatch.service.SubscriptionLookup;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +44,7 @@ public class NotificationService {
     private final NotificationLogStore logs;
     private final DlqPublisher dlq;
     private final DedupStore deliveries;
+    private final Set<String> settledLocally = ConcurrentHashMap.newKeySet();
     private final Clock clock;
     private final Sleeper sleeper;
     private final int maxAttempts;
@@ -220,6 +224,11 @@ public class NotificationService {
 
     private boolean settled(DeliveryTarget target, GitHubEvent event) {
         String subscriptionId = target.subscriptionId().toString();
+        String delivered = DedupKeys.deliveredKey(subscriptionId, event.eventType(), event.number());
+        String failed = DedupKeys.failedKey(subscriptionId, event.eventType(), event.number());
+        if (settledLocally.contains(delivered) || settledLocally.contains(failed)) {
+            return true;
+        }
         try {
             return deliveries.alreadyDelivered(subscriptionId, event.eventType(), event.number())
                     || deliveries.alreadyFailed(subscriptionId, event.eventType(), event.number());
@@ -231,22 +240,26 @@ public class NotificationService {
     }
 
     private void rememberDelivered(DeliveryTarget target, GitHubEvent event) {
+        String key = DedupKeys.deliveredKey(
+                target.subscriptionId().toString(), event.eventType(), event.number());
+        // Discord already accepted. Remember here before the Redis write so a replay in this
+        // process does not post again when that write fails.
+        settledLocally.add(key);
         try {
             deliveries.markDelivered(target.subscriptionId().toString(), event.eventType(), event.number());
-        } catch (DeliveryStoreException ex) {
-            throw ex;
         } catch (RuntimeException ex) {
-            throw new DeliveryStoreException(ex);
+            log.warn("could not record delivery for subscription {}", target.subscriptionId());
         }
     }
 
     private void rememberFailed(DeliveryTarget target, GitHubEvent event) {
+        String key = DedupKeys.failedKey(
+                target.subscriptionId().toString(), event.eventType(), event.number());
+        settledLocally.add(key);
         try {
             deliveries.markFailed(target.subscriptionId().toString(), event.eventType(), event.number());
-        } catch (DeliveryStoreException ex) {
-            throw ex;
         } catch (RuntimeException ex) {
-            throw new DeliveryStoreException(ex);
+            log.warn("could not record a terminal delivery for subscription {}", target.subscriptionId());
         }
     }
 
