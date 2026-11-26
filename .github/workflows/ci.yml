@@ -16,6 +16,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Check formatting
+        run: bash mvnw -B spotless:check
       # GitWatchApplicationContextTest and RepoPollStateLockTest are Testcontainers
       # tests. GitWatchApplicationContextTest boots Postgres, Redis, Mongo, and Kafka;
       # RepoPollStateLockTest proves SKIP LOCKED. On ubuntu-latest Docker is present,
