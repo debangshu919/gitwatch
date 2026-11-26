@@ -28,18 +28,21 @@ public class WatchService {
     private final RepoPollStateRepository pollStates;
     private final SubscriptionRepository subscriptions;
     private final PublicRepoLookup github;
+    private final RepoLock repoLock;
 
     public WatchService(
             RepoRepository repos,
             RepoWatchRepository watches,
             RepoPollStateRepository pollStates,
             SubscriptionRepository subscriptions,
-            PublicRepoLookup github) {
+            PublicRepoLookup github,
+            RepoLock repoLock) {
         this.repos = repos;
         this.watches = watches;
         this.pollStates = pollStates;
         this.subscriptions = subscriptions;
         this.github = github;
+        this.repoLock = repoLock;
     }
 
     @Transactional
@@ -47,6 +50,9 @@ public class WatchService {
         GitHubUrlParser.Coordinates coordinates = GitHubUrlParser.parse(url);
         github.requirePublic(coordinates.owner(), coordinates.repo());
         Repo repo = repos.findByOwnerAndName(coordinates.owner(), coordinates.repo()).orElseGet(() -> create(coordinates));
+        repoLock.lock(repo.getId());
+        repo = repos.findById(repo.getId()).orElseGet(() -> create(coordinates));
+        repoLock.lock(repo.getId());
         ensurePollState(repo);
         if (watches.findByUserIdAndRepoId(user.getId(), repo.getId()).isPresent()) {
             throw new ApiException(409, ApiCodes.CONFLICT, "Repository is already watched");
@@ -87,6 +93,7 @@ public class WatchService {
         Repo repo = watch.getRepo();
         String owner = repo.getOwner();
         String name = repo.getName();
+        repoLock.lock(repoId);
         subscriptions.deleteByUser_IdAndRepo_Id(user.getId(), repoId);
         watches.delete(watch);
         watches.flush();

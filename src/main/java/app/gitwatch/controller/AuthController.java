@@ -53,7 +53,9 @@ public class AuthController {
     @GetMapping("/v1/auth/github")
     public ResponseEntity<Void> github(HttpServletRequest request) {
         String redirect = auth.redirectUri(callback(request));
-        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(auth.authorizeUrl(redirect))).build();
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(auth.authorizeUrl(redirect, auth.optionalUser(request.getHeader("Authorization")))))
+                .build();
     }
 
     @GetMapping("/v1/auth/github/callback")

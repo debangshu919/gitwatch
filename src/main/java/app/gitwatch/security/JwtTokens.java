@@ -59,25 +59,59 @@ public class JwtTokens {
         return sign(claims);
     }
 
-    public String issueState(String redirectUri) {
+    public String issueState(String redirectUri, UUID userId) {
         Instant now = clock.instant();
-        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+        JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
                 .claim("typ", STATE)
                 .claim("redir", redirectUri)
                 .jwtID(UUID.randomUUID().toString())
                 .issueTime(Date.from(now))
-                .expirationTime(Date.from(now.plus(STATE_TTL)))
-                .build();
-        return sign(claims);
+                .expirationTime(Date.from(now.plus(STATE_TTL)));
+        if (userId != null) {
+            claims.claim("uid", userId.toString());
+        }
+        return sign(claims.build());
     }
 
-    public String requireStateRedirect(String state) {
+    public OAuthState requireState(String state) {
         SignedJWT jwt = parse(state);
         String redirect = claim(jwt, "redir");
         if (!STATE.equals(claim(jwt, "typ")) || redirect == null || redirect.isBlank()) {
             throw invalidState();
         }
-        return redirect;
+        String uid = claim(jwt, "uid");
+        if (uid == null || uid.isBlank()) {
+            return new OAuthState(redirect, null);
+        }
+        try {
+            return new OAuthState(redirect, UUID.fromString(uid));
+        } catch (IllegalArgumentException ex) {
+            throw invalidState();
+        }
+    }
+
+    public UUID requireAccessUser(String token) {
+        try {
+            SignedJWT jwt = SignedJWT.parse(token);
+            if (!jwt.verify(new MACVerifier(key.getEncoded()))) {
+                throw unauthorized();
+            }
+            Date expires = jwt.getJWTClaimsSet().getExpirationTime();
+            if (expires == null || expires.toInstant().plusSeconds(60).isBefore(clock.instant())) {
+                throw unauthorized();
+            }
+            if (!ACCESS.equals(jwt.getJWTClaimsSet().getStringClaim("typ"))) {
+                throw unauthorized();
+            }
+            return UUID.fromString(jwt.getJWTClaimsSet().getSubject());
+        } catch (ApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw unauthorized();
+        }
+    }
+
+    public record OAuthState(String redirectUri, UUID userId) {
     }
 
     public static SecretKey key(String secret) {
@@ -129,5 +163,9 @@ public class JwtTokens {
 
     private static ApiException invalidState() {
         return new ApiException(400, ApiCodes.VALIDATION_ERROR, "OAuth state is invalid");
+    }
+
+    private static ApiException unauthorized() {
+        return new ApiException(401, ApiCodes.UNAUTHORIZED, "Authentication required");
     }
 }

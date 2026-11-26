@@ -3,6 +3,7 @@ package app.gitwatch.github;
 import app.gitwatch.api.ApiCodes;
 import app.gitwatch.api.ApiException;
 import java.net.URI;
+import java.util.Locale;
 
 public final class GitHubUrlParser {
 
@@ -47,7 +48,7 @@ public final class GitHubUrlParser {
         if (parts.length != 3 || !valid(parts[1]) || !valid(parts[2])) {
             throw invalid();
         }
-        return new Coordinates(parts[1], parts[2]);
+        return new Coordinates(parts[1].toLowerCase(Locale.ROOT), parts[2].toLowerCase(Locale.ROOT));
     }
 
     private static boolean valid(String name) {

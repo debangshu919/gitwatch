@@ -90,9 +90,9 @@ public class AuthService {
         }
     }
 
-    public String authorizeUrl(String redirectUri) {
+    public String authorizeUrl(String redirectUri, java.util.UUID userId) {
         requireOAuthConfigured();
-        String state = tokens.issueState(redirectUri);
+        String state = tokens.issueState(redirectUri, userId);
         return "https://github.com/login/oauth/authorize?client_id="
                 + encode(properties.getOauth().getClientId())
                 + "&redirect_uri=" + encode(redirectUri)
@@ -114,8 +114,8 @@ public class AuthService {
         if (code == null || code.isBlank() || state == null || state.isBlank()) {
             throw new ApiException(400, ApiCodes.VALIDATION_ERROR, "OAuth callback is missing code or state");
         }
-        String redirectUri = tokens.requireStateRedirect(state);
-        GitHubIdentity identity = github.exchange(code, redirectUri);
+        JwtTokens.OAuthState oauthState = tokens.requireState(state);
+        GitHubIdentity identity = github.exchange(code, oauthState.redirectUri());
         if (identity.providerId() == null || identity.providerId().isBlank()) {
             throw new ApiException(502, ApiCodes.OAUTH_FAILED, "GitHub login could not be completed");
         }
@@ -124,32 +124,58 @@ public class AuthService {
         }
         String email = identity.email().trim().toLowerCase(Locale.ROOT);
         OauthAccount linked = oauthAccounts.findByProviderAndProviderId("github", identity.providerId()).orElse(null);
-        User user;
         if (linked != null) {
-            user = linked.getUser();
+            User owner = linked.getUser();
+            if (oauthState.userId() != null && !oauthState.userId().equals(owner.getId())) {
+                throw new ApiException(409, ApiCodes.CONFLICT, "GitHub account is already linked to another user");
+            }
             linked.setAccessToken(identity.accessToken());
             if (identity.avatarUrl() != null && !identity.avatarUrl().isBlank()) {
-                user.setAvatarUrl(identity.avatarUrl());
+                owner.setAvatarUrl(identity.avatarUrl());
             }
             oauthAccounts.save(linked);
-            users.save(user);
-        } else {
-            user = users.findByEmail(email).orElseGet(() -> createOAuthUser(email, identity));
-            if ((user.getName() == null || user.getName().isBlank()) && identity.name() != null) {
-                user.setName(identity.name());
-            }
-            if (identity.avatarUrl() != null && !identity.avatarUrl().isBlank()) {
-                user.setAvatarUrl(identity.avatarUrl());
-            }
-            users.save(user);
-            OauthAccount account = new OauthAccount();
-            account.setUser(user);
-            account.setProvider("github");
-            account.setProviderId(identity.providerId());
-            account.setAccessToken(identity.accessToken());
-            oauthAccounts.save(account);
+            users.save(owner);
+            return response(owner, true);
         }
-        return response(user, true);
+        if (oauthState.userId() != null) {
+            User user = users.findById(oauthState.userId())
+                    .orElseThrow(() -> new ApiException(401, ApiCodes.UNAUTHORIZED, "Authentication required"));
+            if (!email.equals(user.getEmail())) {
+                throw new ApiException(409, ApiCodes.CONFLICT, "GitHub email does not match this account");
+            }
+            link(user, identity);
+            return response(user, true);
+        }
+        if (users.findByEmail(email).isPresent()) {
+            throw new ApiException(409, ApiCodes.CONFLICT, "An account with this email already exists");
+        }
+        User created = createOAuthUser(email, identity);
+        link(created, identity);
+        return response(created, true);
+    }
+
+    public java.util.UUID optionalUser(String authorization) {
+        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return null;
+        }
+        String token = authorization.substring(7).trim();
+        if (token.isEmpty()) {
+            return null;
+        }
+        return tokens.requireAccessUser(token);
+    }
+
+    private void link(User user, GitHubIdentity identity) {
+        if (identity.avatarUrl() != null && !identity.avatarUrl().isBlank()) {
+            user.setAvatarUrl(identity.avatarUrl());
+            users.save(user);
+        }
+        OauthAccount account = new OauthAccount();
+        account.setUser(user);
+        account.setProvider("github");
+        account.setProviderId(identity.providerId());
+        account.setAccessToken(identity.accessToken());
+        oauthAccounts.save(account);
     }
 
     private User createOAuthUser(String email, GitHubIdentity identity) {

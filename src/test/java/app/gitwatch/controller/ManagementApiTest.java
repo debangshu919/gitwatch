@@ -77,7 +77,7 @@ import org.testcontainers.utility.DockerImageName;
 class ManagementApiTest {
 
     private static final String PASSWORD = "correct-horse";
-    private static final String WEBHOOK = "https://example.invalid/hook/secret-value";
+    private static final String WEBHOOK = "https://discord.com/api/webhooks/123/secret-value";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -257,7 +257,7 @@ class ManagementApiTest {
         String ada = register("ada@example.com", "Ada");
         String grace = register("grace@example.com", "Grace");
         String first = addRepo(ada, "https://github.com/apache/iggy");
-        String second = addRepo(grace, "https://github.com/apache/iggy.git");
+        String second = addRepo(grace, "https://github.com/Apache/Iggy.git");
         assertEquals(first, second);
         assertEquals(1, repos.count());
         assertEquals(2, watches.count());
@@ -326,6 +326,62 @@ class ManagementApiTest {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.error.code").value("OAUTH_NOT_CONFIGURED"));
         verify(githubOAuth, never()).exchange(any(), any());
+    }
+
+    @Test
+    void oauthDoesNotAttachToAnExistingPasswordAccount() throws Exception {
+        String token = register("ada@example.com", "Ada");
+        String hash = users.findByEmail("ada@example.com").orElseThrow().getPasswordHash();
+        properties.getOauth().setClientId("client");
+        properties.getOauth().setClientSecret("secret");
+        when(githubOAuth.exchange(eq("code-1"), any())).thenReturn(
+                new GitHubIdentity("42", "ada", "ada@example.com", "Ada", null, "gho_test"));
+        MvcResult start = mockMvc.perform(get("/v1/auth/github")).andExpect(status().isFound()).andReturn();
+        String state = query(start.getResponse().getRedirectedUrl(), "state");
+        mockMvc.perform(get("/v1/auth/github/callback").param("code", "code-1").param("state", state))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CONFLICT"));
+        assertEquals(0, oauthAccounts.count());
+        assertEquals(hash, users.findByEmail("ada@example.com").orElseThrow().getPasswordHash());
+        mockMvc.perform(post("/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(userJson("ada@example.com", PASSWORD, null)))
+                .andExpect(status().isOk());
+        assertFalse(token.isBlank());
+    }
+
+    @Test
+    void authenticatedGitHubLoginLinksTheSameEmail() throws Exception {
+        String token = register("ada@example.com", "Ada");
+        properties.getOauth().setClientId("client");
+        properties.getOauth().setClientSecret("secret");
+        when(githubOAuth.exchange(eq("code-2"), any())).thenReturn(
+                new GitHubIdentity("77", "ada", "ada@example.com", "Ada", null, "gho_link"));
+        MvcResult start = mockMvc.perform(get("/v1/auth/github").header("Authorization", "Bearer " + token))
+                .andExpect(status().isFound())
+                .andReturn();
+        String state = query(start.getResponse().getRedirectedUrl(), "state");
+        String body = mockMvc.perform(get("/v1/auth/github/callback").param("code", "code-2").param("state", state))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user.email").value("ada@example.com"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertFalse(body.contains("gho_link"));
+        assertEquals(1, oauthAccounts.count());
+    }
+
+    @Test
+    void nonDiscordWebhookIsRejected() throws Exception {
+        String token = register("ada@example.com", "Ada");
+        mockMvc.perform(post("/v1/channels")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"discord\",\"name\":\"Alerts\",\"config\":{\"webhook_url\":\"https://example.invalid/hook\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        assertEquals(0, channels.count());
+        verify(discord, never()).post(any(), any());
     }
 
     @Test

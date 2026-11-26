@@ -40,7 +40,7 @@ From the host, the app uses `localhost:5432`, `localhost:6379`, `localhost:27017
 | `GITHUB_API_BASE` | Override only in tests. Default `https://api.github.com`. |
 | `GITWATCH_SEED_ENABLED` | `true` inserts the documented dev rows through JPA so the webhook is encrypted. Default `false`. The seed does not call GitHub. |
 
-`docker compose --profile app` sets a local-only encryption key (`base64` of `0123456789abcdef0123456789abcdef`). Do not reuse that key outside this compose file.
+`docker compose --profile app` sets a local-only encryption key (`base64` of `0123456789abcdef0123456789abcdef`) and a local-only `GITWATCH_JWT_SECRET`. Do not reuse either outside this compose file. A host `GITWATCH_JWT_SECRET` overrides the compose default.
 
 Generate a key:
 

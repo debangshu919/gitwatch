@@ -12,6 +12,8 @@ import app.gitwatch.repository.ChannelRepository;
 import app.gitwatch.repository.UserRepository;
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +22,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChannelApiService {
 
     public static final String TEST_MESSAGE = "GitWatch test notification";
+    private static final Set<String> DISCORD_HOSTS = Set.of(
+            "discord.com",
+            "discordapp.com",
+            "canary.discord.com",
+            "ptb.discord.com",
+            "canary.discordapp.com",
+            "ptb.discordapp.com");
 
     private final ChannelService channels;
     private final ChannelRepository repository;
@@ -99,8 +108,16 @@ public class ChannelApiService {
         } catch (IllegalArgumentException ex) {
             throw new ApiException(400, ApiCodes.VALIDATION_ERROR, "webhook_url is not a valid URL");
         }
-        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
-            throw new ApiException(400, ApiCodes.VALIDATION_ERROR, "webhook_url must be an https URL");
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        int port = uri.getPort();
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        if (!"https".equalsIgnoreCase(uri.getScheme())
+                || uri.getUserInfo() != null
+                || (port != -1 && port != 443)
+                || !DISCORD_HOSTS.contains(host)
+                || !path.startsWith("/api/webhooks/")
+                || path.contains("..")) {
+            throw new ApiException(400, ApiCodes.VALIDATION_ERROR, "webhook_url must be a Discord webhook");
         }
     }
 }

@@ -14,6 +14,7 @@ class GitHubUrlParserTest {
         assertEquals(new GitHubUrlParser.Coordinates("apache", "iggy"), GitHubUrlParser.parse("https://github.com/apache/iggy.git"));
         assertEquals(new GitHubUrlParser.Coordinates("apache", "iggy"), GitHubUrlParser.parse("https://github.com/apache/iggy/"));
         assertEquals(new GitHubUrlParser.Coordinates("apache", "iggy"), GitHubUrlParser.parse("http://www.github.com/apache/iggy"));
+        assertEquals(new GitHubUrlParser.Coordinates("apache", "iggy"), GitHubUrlParser.parse("https://github.com/Apache/Iggy"));
     }
 
     @Test

@@ -29,6 +29,7 @@ public class AccountService {
     private final RepoWatchRepository watches;
     private final RepoRepository repos;
     private final RepoPollStateRepository pollStates;
+    private final RepoLock repoLock;
     private final EntityManager entityManager;
 
     public AccountService(
@@ -39,6 +40,7 @@ public class AccountService {
             RepoWatchRepository watches,
             RepoRepository repos,
             RepoPollStateRepository pollStates,
+            RepoLock repoLock,
             EntityManager entityManager) {
         this.users = users;
         this.subscriptions = subscriptions;
@@ -47,6 +49,7 @@ public class AccountService {
         this.watches = watches;
         this.repos = repos;
         this.pollStates = pollStates;
+        this.repoLock = repoLock;
         this.entityManager = entityManager;
     }
 
@@ -76,6 +79,7 @@ public class AccountService {
         users.delete(users.getReferenceById(managed.getId()));
         entityManager.flush();
         for (UUID repoId : repoIds) {
+            repoLock.lock(repoId);
             if (watches.countByRepoId(repoId) == 0 && subscriptions.countByRepo_Id(repoId) == 0) {
                 repos.findById(repoId).ifPresent(this::deleteShared);
             }

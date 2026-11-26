@@ -1,5 +1,5 @@
 # Local dependencies for GitWatch. No ZooKeeper: Kafka runs in KRaft mode.
-# The app profile sets a dev-only encryption key. Do not reuse it outside this compose file.
+# The app profile sets a dev-only encryption key and JWT secret. Do not reuse them outside this compose file.
 
 services:
   postgres:
@@ -69,6 +69,7 @@ services:
         condition: service_started
     environment:
       GITWATCH_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      GITWATCH_JWT_SECRET: ${GITWATCH_JWT_SECRET:-local-dev-jwt-secret-not-for-production!}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       DATABASE_URL: jdbc:postgresql://postgres:5432/gitwatch
       DATABASE_USERNAME: gitwatch
