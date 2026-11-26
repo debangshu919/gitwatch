@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a change to this repository.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        README lists what is intentionally absent. That list needs an issue before a pull request. Discuss it first before a pull request that adds a frontend, auth, a management API, Telegram, Slack, billing, a GitHub App, inbound webhooks, or private-repository support.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: What do you want changed?
+    validations:
+      required: true
+  - type: textarea
+    id: why-not-wait
+    attributes:
+      label: Why it cannot wait for a discussion
+      description: If this can wait, say that this issue is the discussion. If it cannot, say why.
+    validations:
+      required: true

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security policy
+    url: https://github.com/debangshu919/gitwatch/blob/main/SECURITY.md
+    about: Read that file. Do not open a public issue for a vulnerability.

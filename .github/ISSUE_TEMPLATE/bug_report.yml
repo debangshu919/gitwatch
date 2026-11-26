@@ -1,0 +1,56 @@
+name: Bug report
+description: Report something that does not work as this repository describes it.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste tokens, webhook URLs, or encryption keys. Do not report a vulnerability here. Read SECURITY.md and contact the maintainer privately.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What did you do before this happened?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: The commit you built, or the version from pom.xml. There are no releases. The supported line is main, and pom.xml is 0.1.0-SNAPSHOT.
+    validations:
+      required: true
+  - type: dropdown
+    id: docker
+    attributes:
+      label: Was Docker running?
+      description: The PostgreSQL Testcontainers test runs only when Docker is already running, and is skipped otherwise.
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only the lines that show the failure. Do not paste tokens, webhook URLs, or encryption keys.
+      render: shell
+    validations:
+      required: false
