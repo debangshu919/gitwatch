@@ -75,7 +75,13 @@ public class RepoPoller {
     void pollOne(PollTarget target, Instant now) {
         FetchResult issues;
         try {
-            issues = fetch(target.owner(), target.repo(), target.lastIssueNumber(), target.issuePage(), target.issueHighWater(), true);
+            issues = fetch(
+                    target.owner(),
+                    target.repo(),
+                    target.lastIssueNumber(),
+                    target.issuePage(),
+                    target.issueHighWater(),
+                    true);
         } catch (GitHubRateLimitException ex) {
             delay(target, ex.retryAt());
             return;
@@ -87,7 +93,8 @@ public class RepoPoller {
         }
         FetchResult pulls;
         try {
-            pulls = fetch(target.owner(), target.repo(), target.lastPrNumber(), target.prPage(), target.prHighWater(), false);
+            pulls = fetch(
+                    target.owner(), target.repo(), target.lastPrNumber(), target.prPage(), target.prHighWater(), false);
         } catch (GitHubRateLimitException ex) {
             Integer held = publishAll(issues.events());
             store.save(hold(target, progress(target, issues, null, now, ex.retryAt()), held, null));
@@ -132,7 +139,8 @@ public class RepoPoller {
                 saved.nextPollAt());
     }
 
-    private PollTarget progress(PollTarget current, FetchResult issues, FetchResult pulls, Instant polledAt, Instant nextPollAt) {
+    private PollTarget progress(
+            PollTarget current, FetchResult issues, FetchResult pulls, Instant polledAt, Instant nextPollAt) {
         return new PollTarget(
                 current.owner(),
                 current.repo(),
@@ -161,7 +169,8 @@ public class RepoPoller {
         return left.isAfter(right) ? left : right;
     }
 
-    private FetchResult fetch(String owner, String repo, Integer lastSeen, int startPage, Integer highWater, boolean issues) {
+    private FetchResult fetch(
+            String owner, String repo, Integer lastSeen, int startPage, Integer highWater, boolean issues) {
         if (lastSeen == null) {
             return baseline(owner, repo, issues);
         }
@@ -229,7 +238,8 @@ public class RepoPoller {
         for (RemoteItem item : page.items()) {
             high = Math.max(high, item.number());
         }
-        return new FetchResult(List.of(), high, 1, null, false, page.lowRemaining(), page.lowRemaining() ? page.resetAt() : null);
+        return new FetchResult(
+                List.of(), high, 1, null, false, page.lowRemaining(), page.lowRemaining() ? page.resetAt() : null);
     }
 
     private GitHubEvent toEvent(String owner, String repo, RemoteItem item, boolean issue) {
@@ -297,6 +307,5 @@ public class RepoPoller {
             Integer highWater,
             boolean rateLimited,
             boolean lowRemaining,
-            Instant delayUntil) {
-    }
+            Instant delayUntil) {}
 }

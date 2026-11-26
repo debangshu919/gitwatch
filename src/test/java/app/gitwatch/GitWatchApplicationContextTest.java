@@ -23,11 +23,12 @@ import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers(disabledWithoutDocker = true)
-@TestPropertySource(properties = {
-        "gitwatch.encryption-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-        "gitwatch.poller.enabled=false",
-        "gitwatch.seed.enabled=false"
-})
+@TestPropertySource(
+        properties = {
+            "gitwatch.encryption-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            "gitwatch.poller.enabled=false",
+            "gitwatch.seed.enabled=false"
+        })
 class GitWatchApplicationContextTest {
 
     @Container

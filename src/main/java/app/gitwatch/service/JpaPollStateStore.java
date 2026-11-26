@@ -37,7 +37,9 @@ public class JpaPollStateStore implements PollStateStore {
     @Override
     @Transactional
     public void save(PollTarget target) {
-        RepoPollState state = repository.findById(new RepoPollStateId(target.owner(), target.repo())).orElseThrow();
+        RepoPollState state = repository
+                .findById(new RepoPollStateId(target.owner(), target.repo()))
+                .orElseThrow();
         state.setLastIssueNumber(target.lastIssueNumber());
         state.setLastPrNumber(target.lastPrNumber());
         state.setIssuePage(target.issuePage());

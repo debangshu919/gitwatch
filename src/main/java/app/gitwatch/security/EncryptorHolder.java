@@ -4,8 +4,7 @@ public final class EncryptorHolder {
 
     private static volatile SecretEncryptor encryptor;
 
-    private EncryptorHolder() {
-    }
+    private EncryptorHolder() {}
 
     public static void set(SecretEncryptor value) {
         encryptor = value;

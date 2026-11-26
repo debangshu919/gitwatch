@@ -121,7 +121,8 @@ public class GitHubClient {
     private RemoteItem toItem(JsonNode node, String kind) {
         boolean pullRequest = "pulls".equals(kind) || node.hasNonNull("pull_request");
         JsonNode user = node.get("user");
-        String author = user != null && user.hasNonNull("login") ? user.get("login").asText() : "unknown";
+        String author =
+                user != null && user.hasNonNull("login") ? user.get("login").asText() : "unknown";
         String url = node.hasNonNull("html_url") ? node.get("html_url").asText() : "";
         Instant createdAt = node.hasNonNull("created_at")
                 ? Instant.parse(node.get("created_at").asText())
@@ -164,7 +165,10 @@ public class GitHubClient {
     }
 
     private int remaining(HttpResponse<String> response) {
-        return response.headers().firstValue("x-ratelimit-remaining").map(Integer::parseInt).orElse(Integer.MAX_VALUE);
+        return response.headers()
+                .firstValue("x-ratelimit-remaining")
+                .map(Integer::parseInt)
+                .orElse(Integer.MAX_VALUE);
     }
 
     private Instant resetAt(HttpResponse<String> response) {

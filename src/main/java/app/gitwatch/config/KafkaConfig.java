@@ -20,12 +20,18 @@ public class KafkaConfig {
 
     @Bean
     public NewTopic githubEventsTopic() {
-        return TopicBuilder.name(KafkaTopics.GITHUB_EVENTS).partitions(3).replicas(1).build();
+        return TopicBuilder.name(KafkaTopics.GITHUB_EVENTS)
+                .partitions(3)
+                .replicas(1)
+                .build();
     }
 
     @Bean
     public NewTopic notificationsDlqTopic() {
-        return TopicBuilder.name(KafkaTopics.NOTIFICATIONS_DLQ).partitions(3).replicas(1).build();
+        return TopicBuilder.name(KafkaTopics.NOTIFICATIONS_DLQ)
+                .partitions(3)
+                .replicas(1)
+                .build();
     }
 
     @Bean
@@ -35,10 +41,7 @@ public class KafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
-            ConsumerFactory<String, String> consumerFactory,
-            TopicSender sender,
-            ObjectMapper mapper,
-            Clock clock) {
+            ConsumerFactory<String, String> consumerFactory, TopicSender sender, ObjectMapper mapper, Clock clock) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);

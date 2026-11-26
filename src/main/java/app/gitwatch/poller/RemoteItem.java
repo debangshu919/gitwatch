@@ -11,5 +11,4 @@ public record RemoteItem(
         String url,
         String body,
         Instant createdAt,
-        boolean pullRequest) {
-}
+        boolean pullRequest) {}

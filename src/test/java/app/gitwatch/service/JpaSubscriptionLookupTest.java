@@ -29,7 +29,8 @@ class JpaSubscriptionLookupTest {
     @Test
     void unreadableWebhookDoesNotDropOtherSubscribers() throws Exception {
         Subscription broken = subscription(plaintextChannel(), UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
-        Subscription healthy = subscription(encryptedChannel(), UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+        Subscription healthy =
+                subscription(encryptedChannel(), UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
         JpaSubscriptionLookup lookup = new JpaSubscriptionLookup(null);
 
         List<DeliveryTarget> targets = lookup.targetsFor(List.of(broken, healthy));

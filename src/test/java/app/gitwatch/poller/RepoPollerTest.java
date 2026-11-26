@@ -60,7 +60,8 @@ class RepoPollerTest {
         properties.getPoller().setBatchSize(10);
         properties.getPoller().setNextPollDelay(Duration.ofMinutes(3));
         properties.getPoller().setLease(Duration.ofMinutes(5));
-        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+        HttpClient http =
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
         GitHubClient github = new GitHubClient(http, mapper, Clock.fixed(NOW, ZoneOffset.UTC), properties);
         poller = new RepoPoller(store, github, dedup, publisher, properties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
@@ -73,7 +74,8 @@ class RepoPollerTest {
     @Test
     void newIssueIsPublishedOnce() throws Exception {
         store.put(due(1420, 1420));
-        enqueueIssues(issue(1423, "Add support for streaming queries", "username", "First 200 characters...", "good first issue"));
+        enqueueIssues(issue(
+                1423, "Add support for streaming queries", "username", "First 200 characters...", "good first issue"));
         enqueuePulls("[]");
 
         poller.poll();
@@ -141,9 +143,14 @@ class RepoPollerTest {
         poller.poll();
 
         assertEquals(2, publisher.events.size());
-        assertTrue(publisher.events.stream().noneMatch(event -> event.number() == 1422 && EventTypes.ISSUE_OPENED.equals(event.eventType())));
-        assertTrue(publisher.events.stream().anyMatch(event -> event.number() == 1423 && EventTypes.ISSUE_OPENED.equals(event.eventType())));
-        GitHubEvent pr = publisher.events.stream().filter(event -> EventTypes.PR_OPENED.equals(event.eventType())).findFirst().orElseThrow();
+        assertTrue(publisher.events.stream()
+                .noneMatch(event -> event.number() == 1422 && EventTypes.ISSUE_OPENED.equals(event.eventType())));
+        assertTrue(publisher.events.stream()
+                .anyMatch(event -> event.number() == 1423 && EventTypes.ISSUE_OPENED.equals(event.eventType())));
+        GitHubEvent pr = publisher.events.stream()
+                .filter(event -> EventTypes.PR_OPENED.equals(event.eventType()))
+                .findFirst()
+                .orElseThrow();
         assertEquals(1422, pr.number());
         assertEquals("https://github.com/apache/iggy/pull/1422", pr.url());
     }
@@ -170,12 +177,10 @@ class RepoPollerTest {
     void lowRemainingDelaysTheNextPoll() throws Exception {
         store.put(due(1420, 1420));
         long reset = NOW.plus(Duration.ofMinutes(15)).getEpochSecond();
-        enqueueIssues(issue(1423, "title", "username", "body", "bug"), Map.of(
-                "X-RateLimit-Remaining", "1",
-                "X-RateLimit-Reset", Long.toString(reset)));
-        enqueuePulls("[]", Map.of(
-                "X-RateLimit-Remaining", "1",
-                "X-RateLimit-Reset", Long.toString(reset)));
+        enqueueIssues(
+                issue(1423, "title", "username", "body", "bug"),
+                Map.of("X-RateLimit-Remaining", "1", "X-RateLimit-Reset", Long.toString(reset)));
+        enqueuePulls("[]", Map.of("X-RateLimit-Remaining", "1", "X-RateLimit-Reset", Long.toString(reset)));
 
         poller.poll();
 
@@ -204,7 +209,8 @@ class RepoPollerTest {
         int[][] pages = {{16, 15}, {14, 13}, {12, 11}, {10, 9}};
 
         for (int i = 0; i < pages.length; i++) {
-            enqueueIssues(issue(pages[i][0], "title", "username", "body"), issue(pages[i][1], "title", "username", "body"));
+            enqueueIssues(
+                    issue(pages[i][0], "title", "username", "body"), issue(pages[i][1], "title", "username", "body"));
             enqueuePulls("[]");
             assertEquals(i + 1, pollIssuesPage());
             Mutable state = store.get("apache", "iggy");
@@ -219,13 +225,17 @@ class RepoPollerTest {
             }
         }
 
-        assertEquals(List.of(15, 16, 13, 14, 11, 12), publisher.events.stream().map(GitHubEvent::number).toList());
+        assertEquals(
+                List.of(15, 16, 13, 14, 11, 12),
+                publisher.events.stream().map(GitHubEvent::number).toList());
 
         enqueueIssues(issue(17, "title", "username", "body"), issue(16, "title", "username", "body"));
         enqueuePulls("[]");
         assertEquals(1, pollIssuesPage());
         assertEquals(17, store.get("apache", "iggy").lastIssueNumber);
-        assertEquals(List.of(15, 16, 13, 14, 11, 12, 17), publisher.events.stream().map(GitHubEvent::number).toList());
+        assertEquals(
+                List.of(15, 16, 13, 14, 11, 12, 17),
+                publisher.events.stream().map(GitHubEvent::number).toList());
     }
 
     @Test
@@ -282,7 +292,8 @@ class RepoPollerTest {
     }
 
     private static String issue(int number, String title, String author, String body, String... labels) {
-        String labelJson = labels.length == 0 ? "[]" : "[{" + "\"name\":\"" + String.join("\"},{\"name\":\"", labels) + "\"}]";
+        String labelJson =
+                labels.length == 0 ? "[]" : "[{" + "\"name\":\"" + String.join("\"},{\"name\":\"", labels) + "\"}]";
         return """
                 {"number":%d,"title":"%s","user":{"login":"%s"},"labels":%s,"html_url":"https://github.com/apache/iggy/issues/%d","body":"%s","created_at":"2026-11-17T03:00:00Z"}
                 """.formatted(number, title, author, labelJson, number, body).trim();
@@ -316,7 +327,8 @@ class RepoPollerTest {
         properties.getPoller().setBatchSize(10);
         properties.getPoller().setNextPollDelay(Duration.ofMinutes(3));
         properties.getPoller().setLease(Duration.ofMinutes(5));
-        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+        HttpClient http =
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
         GitHubClient github = new GitHubClient(http, mapper, Clock.fixed(NOW, ZoneOffset.UTC), properties);
         return new RepoPoller(store, github, dedup, publisher, properties, Clock.fixed(NOW, ZoneOffset.UTC));
     }

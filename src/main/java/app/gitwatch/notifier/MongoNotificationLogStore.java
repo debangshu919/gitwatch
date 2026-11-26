@@ -19,9 +19,7 @@ public class MongoNotificationLogStore implements NotificationLogStore {
     private final AtomicBoolean indexReady = new AtomicBoolean(false);
 
     public MongoNotificationLogStore(
-            NotificationLogRepository repository,
-            MongoTemplate mongoTemplate,
-            AppProperties properties) {
+            NotificationLogRepository repository, MongoTemplate mongoTemplate, AppProperties properties) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
         this.ttlDays = properties.getMongo().getLogTtlDays();
@@ -37,7 +35,11 @@ public class MongoNotificationLogStore implements NotificationLogStore {
         if (!indexReady.compareAndSet(false, true)) {
             return;
         }
-        mongoTemplate.indexOps(NotificationLog.class)
-                .createIndex(new Index().on("created_at", Sort.Direction.ASC).expire(Duration.ofDays(ttlDays)).named("notification_logs_ttl"));
+        mongoTemplate
+                .indexOps(NotificationLog.class)
+                .createIndex(new Index()
+                        .on("created_at", Sort.Direction.ASC)
+                        .expire(Duration.ofDays(ttlDays))
+                        .named("notification_logs_ttl"));
     }
 }

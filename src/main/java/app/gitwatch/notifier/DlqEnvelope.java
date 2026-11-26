@@ -8,8 +8,7 @@ import java.time.Instant;
 
 public final class DlqEnvelope {
 
-    private DlqEnvelope() {
-    }
+    private DlqEnvelope() {}
 
     public static String write(
             ObjectMapper mapper,

@@ -41,7 +41,9 @@ class SecretEncryptorTest {
         channel.setConfig(config);
         assertFalse(channel.getConfigJson().contains("secret"));
         assertTrue(channel.getConfigJson().contains(SecretEncryptor.PREFIX));
-        assertEquals("https://discord.com/api/webhooks/123/secret", channel.getConfig().getWebhookUrl());
+        assertEquals(
+                "https://discord.com/api/webhooks/123/secret",
+                channel.getConfig().getWebhookUrl());
     }
 
     @Test

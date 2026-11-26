@@ -4,8 +4,7 @@ import app.gitwatch.model.ChannelTypes;
 
 public final class ChannelPolicy {
 
-    private ChannelPolicy() {
-    }
+    private ChannelPolicy() {}
 
     public static boolean isTelegram(String type) {
         return type != null && ChannelTypes.TELEGRAM.equalsIgnoreCase(type.trim());

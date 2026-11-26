@@ -13,7 +13,11 @@ class DiscordMessageFormatterTest {
 
     @Test
     void issueMatchesSpecFormat() {
-        assertEquals(spec("New Issue", "https://github.com/apache/iggy/issues/1423", "Labels: good first issue, help wanted"),
+        assertEquals(
+                spec(
+                        "New Issue",
+                        "https://github.com/apache/iggy/issues/1423",
+                        "Labels: good first issue, help wanted"),
                 DiscordMessageFormatter.format(issue(List.of("good first issue", "help wanted"))));
     }
 
@@ -30,7 +34,8 @@ class DiscordMessageFormatterTest {
                 "https://github.com/apache/iggy/pull/1423",
                 "",
                 Instant.parse("2026-11-17T03:00:00Z"));
-        assertEquals(spec("New Pull Request", "https://github.com/apache/iggy/pull/1423", "Labels: bug"),
+        assertEquals(
+                spec("New Pull Request", "https://github.com/apache/iggy/pull/1423", "Labels: bug"),
                 DiscordMessageFormatter.format(event));
     }
 

@@ -7,8 +7,7 @@ public final class DedupKeys {
     public static final String IN_FLIGHT_VALUE = "inflight";
     public static final String COMPLETED_VALUE = "done";
 
-    private DedupKeys() {
-    }
+    private DedupKeys() {}
 
     public static String key(String owner, String repo, String eventType, int number) {
         return "dedup:" + owner + "/" + repo + ":" + eventType + ":" + number;
