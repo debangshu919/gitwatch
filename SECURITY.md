@@ -2,9 +2,7 @@
 
 ## How to report
 
-Do not open a public issue, public pull request, or public discussion for a vulnerability.
-
-Contact the maintainer @debangshu919 privately on GitHub (https://github.com/debangshu919). If the repository Security tab offers "Report a vulnerability", use that instead.
+Do not open a public issue, pull request, or discussion for a vulnerability. Report through https://debangshu.dev.
 
 Never include a live encryption key, GitHub token, or Discord webhook URL in a report.
 
