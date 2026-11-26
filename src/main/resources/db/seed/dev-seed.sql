@@ -1,0 +1,11 @@
+-- Optional inspection seed. Prefer the application seed so webhook URLs are encrypted:
+--   set GITWATCH_SEED_ENABLED=true and start the app once.
+-- That seed inserts apache/iggy, a Discord channel, issue.opened and pr.opened
+-- subscriptions, and a due repo_poll_state row with null cursors.
+--
+-- A null cursor baselines on the first poll: the current high-water mark is stored
+-- and historical issues are not published. Set the numbers below only when you
+-- want alerts for items newer than a known number.
+
+-- INSERT INTO repo_poll_state (owner, repo, last_issue_number, last_pr_number, next_poll_at)
+-- VALUES ('apache', 'iggy', 1400, 1400, now());
