@@ -1,14 +1,12 @@
 # GitWatch
 
-GitWatch polls public GitHub repositories and posts a Discord message when a new issue or pull request appears. This repository is the first backend slice: a Spring Boot 3.5 service, Java 21, Maven. There is no frontend, no login, and no management API.
+GitWatch polls public GitHub repositories and posts a Discord message when a new issue or pull request appears. This repository is a Spring Boot 3.5 service, Java 21, Maven. There is no frontend. Login and the management API are under `/v1`; see [docs/api.md](docs/api.md).
 
 A poll runs about every 30 seconds and only considers repositories that already have an active subscription and a due `repo_poll_state` row. New issues and pull requests are published once to Kafka topic `github.events`. A worker on that topic applies subscription label filters and posts to Discord. The same GitHub number is not published again for 30 days.
 
 ## What is intentionally absent
 
 - Frontend, Next.js, or any UI
-- Auth endpoints, JWT, and GitHub OAuth login (the tables exist; login is not implemented)
-- Management REST API for users, repos, channels, and subscriptions
 - Telegram sender, bot, or chat-id flow. The `channels.type` column may contain `telegram`, and application code rejects creating one and never delivers to one
 - GitHub App, inbound GitHub webhooks, private repositories
 - Slack, teams, billing
@@ -29,7 +27,10 @@ From the host, the app uses `localhost:5432`, `localhost:6379`, `localhost:27017
 | Variable | Purpose |
 | --- | --- |
 | `GITWATCH_ENCRYPTION_KEY` | Required. Base64 of 32 bytes. AES-GCM key for OAuth tokens and Discord webhook URLs. Never commit a real key. |
-| `GITHUB_TOKEN` | GitHub token used as `Authorization: Bearer`. Public repos work without it at a lower rate limit. |
+| `GITWATCH_JWT_SECRET` | Required outside tests. At least 32 UTF-8 bytes. HS256 secret for access tokens (7 day expiry) and OAuth state. |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | Optional. If either is unset, `GET /v1/auth/github` and the callback return 503 and the rest of the API still runs. |
+| `GITHUB_OAUTH_REDIRECT_URI` | Optional callback URL. When unset, the redirect is built from the request. |
+| `GITHUB_TOKEN` | GitHub token used as `Authorization: Bearer`. Public repos work without it at a lower rate limit. Adding a repository calls the GitHub API to reject private repos. |
 | `DATABASE_URL` | JDBC URL. Default `jdbc:postgresql://localhost:5432/gitwatch`. |
 | `DATABASE_USERNAME` | Default `gitwatch`. |
 | `DATABASE_PASSWORD` | Default `gitwatch`. |
@@ -39,7 +40,7 @@ From the host, the app uses `localhost:5432`, `localhost:6379`, `localhost:27017
 | `GITHUB_API_BASE` | Override only in tests. Default `https://api.github.com`. |
 | `GITWATCH_SEED_ENABLED` | `true` inserts the documented dev rows through JPA so the webhook is encrypted. Default `false`. The seed does not call GitHub. |
 
-`docker compose --profile app` sets a local-only encryption key (`base64` of `0123456789abcdef0123456789abcdef`). Do not reuse that key outside this compose file.
+`docker compose --profile app` sets a local-only encryption key (`base64` of `0123456789abcdef0123456789abcdef`) and a local-only `GITWATCH_JWT_SECRET`. Do not reuse either outside this compose file. A host `GITWATCH_JWT_SECRET` overrides the compose default.
 
 Generate a key:
 

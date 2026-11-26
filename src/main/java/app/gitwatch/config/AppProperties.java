@@ -7,6 +7,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AppProperties {
 
     private String encryptionKey = "";
+    private String jwtSecret = "";
+    private Duration jwtExpiry = Duration.ofDays(7);
+    private Oauth oauth = new Oauth();
+    private RateLimit rateLimit = new RateLimit();
     private Github github = new Github();
     private Poller poller = new Poller();
     private Notifier notifier = new Notifier();
@@ -19,6 +23,38 @@ public class AppProperties {
 
     public void setEncryptionKey(String encryptionKey) {
         this.encryptionKey = encryptionKey;
+    }
+
+    public String getJwtSecret() {
+        return jwtSecret;
+    }
+
+    public void setJwtSecret(String jwtSecret) {
+        this.jwtSecret = jwtSecret;
+    }
+
+    public Duration getJwtExpiry() {
+        return jwtExpiry;
+    }
+
+    public void setJwtExpiry(Duration jwtExpiry) {
+        this.jwtExpiry = jwtExpiry;
+    }
+
+    public Oauth getOauth() {
+        return oauth;
+    }
+
+    public void setOauth(Oauth oauth) {
+        this.oauth = oauth;
+    }
+
+    public RateLimit getRateLimit() {
+        return rateLimit;
+    }
+
+    public void setRateLimit(RateLimit rateLimit) {
+        this.rateLimit = rateLimit;
     }
 
     public Github getGithub() {
@@ -59,6 +95,61 @@ public class AppProperties {
 
     public void setMongo(Mongo mongo) {
         this.mongo = mongo;
+    }
+
+    public static class Oauth {
+        private String clientId = "";
+        private String clientSecret = "";
+        private String redirectUri = "";
+
+        public String getClientId() {
+            return clientId;
+        }
+
+        public void setClientId(String clientId) {
+            this.clientId = clientId;
+        }
+
+        public String getClientSecret() {
+            return clientSecret;
+        }
+
+        public void setClientSecret(String clientSecret) {
+            this.clientSecret = clientSecret;
+        }
+
+        public String getRedirectUri() {
+            return redirectUri;
+        }
+
+        public void setRedirectUri(String redirectUri) {
+            this.redirectUri = redirectUri;
+        }
+
+        public boolean isConfigured() {
+            return clientId != null && !clientId.isBlank() && clientSecret != null && !clientSecret.isBlank();
+        }
+    }
+
+    public static class RateLimit {
+        private int authPerMinute = 10;
+        private int userPerMinute = 100;
+
+        public int getAuthPerMinute() {
+            return authPerMinute;
+        }
+
+        public void setAuthPerMinute(int authPerMinute) {
+            this.authPerMinute = authPerMinute;
+        }
+
+        public int getUserPerMinute() {
+            return userPerMinute;
+        }
+
+        public void setUserPerMinute(int userPerMinute) {
+            this.userPerMinute = userPerMinute;
+        }
     }
 
     public static class Github {
