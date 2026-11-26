@@ -1,6 +1,9 @@
 package app.gitwatch.poller;
 
 import app.gitwatch.config.AppProperties;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.exc.InputCoercionException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -107,6 +110,26 @@ public class GitHubClient {
     }
 
     private List<RemoteItem> parse(String body, String kind) throws IOException {
+        try (JsonParser parser = mapper.createParser(body)) {
+            if (parser.nextToken() != JsonToken.START_ARRAY) {
+                return parseTree(body, kind);
+            }
+            List<RemoteItem> items = new ArrayList<>();
+            while (true) {
+                JsonToken token = parser.nextToken();
+                if (token == JsonToken.END_ARRAY) {
+                    return items;
+                }
+                if (token == JsonToken.START_OBJECT) {
+                    items.add(readObject(parser, kind));
+                } else {
+                    items.add(toItem(parser.readValueAsTree(), kind));
+                }
+            }
+        }
+    }
+
+    private List<RemoteItem> parseTree(String body, String kind) throws IOException {
         JsonNode root = mapper.readTree(body);
         if (!root.isArray()) {
             throw new GitHubClientException(0, "GitHub list was not an array");
@@ -116,6 +139,199 @@ public class GitHubClient {
             items.add(toItem(node, kind));
         }
         return items;
+    }
+
+    private RemoteItem readObject(JsonParser parser, String kind) throws IOException {
+        int number = 0;
+        String title = "";
+        String author = "unknown";
+        String url = "";
+        String body = "";
+        Instant createdAt = Instant.EPOCH;
+        boolean pullRequest = "pulls".equals(kind);
+        List<String> labels = new ArrayList<>();
+        while (parser.nextToken() != JsonToken.END_OBJECT) {
+            String field = parser.currentName();
+            JsonToken value = parser.nextToken();
+            if (value == null) {
+                break;
+            }
+            if ("number".equals(field)) {
+                number = scalarInt(parser, value);
+            } else if ("title".equals(field)) {
+                title = scalarTextOrEmpty(parser, value);
+            } else if ("html_url".equals(field)) {
+                url = scalarTextOrEmpty(parser, value);
+            } else if ("body".equals(field)) {
+                body = scalarTextOrEmpty(parser, value);
+            } else if ("created_at".equals(field)) {
+                createdAt = createdAt(parser, value);
+            } else if ("pull_request".equals(field)) {
+                if (value != JsonToken.VALUE_NULL) {
+                    pullRequest = true;
+                    skipValue(parser, value);
+                }
+            } else if ("user".equals(field)) {
+                author = readAuthor(parser, value);
+            } else if ("labels".equals(field)) {
+                labels = readLabels(parser, value);
+            } else {
+                skipValue(parser, value);
+            }
+        }
+        return new RemoteItem(number, title, author, labels, url, body, createdAt, pullRequest);
+    }
+
+    private static String readAuthor(JsonParser parser, JsonToken value) throws IOException {
+        if (value != JsonToken.START_OBJECT) {
+            skipValue(parser, value);
+            return "unknown";
+        }
+        String author = "unknown";
+        while (parser.nextToken() != JsonToken.END_OBJECT) {
+            String field = parser.currentName();
+            JsonToken child = parser.nextToken();
+            if (!"login".equals(field)) {
+                skipValue(parser, child);
+                continue;
+            }
+            if (child == JsonToken.VALUE_NULL || child == null) {
+                author = "unknown";
+            } else if (child == JsonToken.START_OBJECT || child == JsonToken.START_ARRAY) {
+                parser.skipChildren();
+                author = "";
+            } else {
+                String text = scalarText(parser, child);
+                author = text == null ? "unknown" : text;
+            }
+        }
+        return author;
+    }
+
+    private static List<String> readLabels(JsonParser parser, JsonToken value) throws IOException {
+        if (value != JsonToken.START_ARRAY) {
+            skipValue(parser, value);
+            return new ArrayList<>();
+        }
+        List<String> names = new ArrayList<>();
+        while (parser.nextToken() != JsonToken.END_ARRAY) {
+            JsonToken element = parser.currentToken();
+            if (element == JsonToken.VALUE_STRING) {
+                names.add(parser.getText());
+            } else if (element == JsonToken.START_OBJECT) {
+                String name = readLabelName(parser);
+                if (name != null) {
+                    names.add(name);
+                }
+            } else {
+                skipValue(parser, element);
+            }
+        }
+        return names;
+    }
+
+    private static String readLabelName(JsonParser parser) throws IOException {
+        String name = null;
+        boolean present = false;
+        while (parser.nextToken() != JsonToken.END_OBJECT) {
+            String field = parser.currentName();
+            JsonToken child = parser.nextToken();
+            if ("name".equals(field) && child != JsonToken.VALUE_NULL && child != null) {
+                if (child == JsonToken.START_OBJECT || child == JsonToken.START_ARRAY) {
+                    parser.skipChildren();
+                    name = "";
+                    present = true;
+                } else {
+                    name = scalarText(parser, child);
+                    present = name != null;
+                }
+            } else {
+                skipValue(parser, child);
+            }
+        }
+        return present ? name : null;
+    }
+
+    private static Instant createdAt(JsonParser parser, JsonToken value) throws IOException {
+        if (value == JsonToken.VALUE_NULL || value == null) {
+            return Instant.EPOCH;
+        }
+        String text = scalarText(parser, value);
+        return Instant.parse(text == null ? "" : text);
+    }
+
+    private static String scalarTextOrEmpty(JsonParser parser, JsonToken value) throws IOException {
+        String text = scalarText(parser, value);
+        return text == null ? "" : text;
+    }
+
+    private static String scalarText(JsonParser parser, JsonToken value) throws IOException {
+        if (value == JsonToken.VALUE_STRING) {
+            return parser.getText();
+        }
+        if (value == JsonToken.VALUE_NUMBER_INT || value == JsonToken.VALUE_NUMBER_FLOAT) {
+            return parser.getNumberValue().toString();
+        }
+        if (value == JsonToken.VALUE_TRUE) {
+            return "true";
+        }
+        if (value == JsonToken.VALUE_FALSE) {
+            return "false";
+        }
+        if (value == JsonToken.VALUE_NULL || value == null) {
+            return null;
+        }
+        skipValue(parser, value);
+        return "";
+    }
+
+    private static int scalarInt(JsonParser parser, JsonToken value) throws IOException {
+        if (value == JsonToken.VALUE_NUMBER_INT) {
+            try {
+                return (int) parser.getLongValue();
+            } catch (InputCoercionException ex) {
+                return parser.getNumberValue().intValue();
+            }
+        }
+        if (value == JsonToken.VALUE_NUMBER_FLOAT) {
+            return (int) parser.getDoubleValue();
+        }
+        if (value == JsonToken.VALUE_STRING) {
+            return parseIntText(parser.getText());
+        }
+        if (value == JsonToken.VALUE_TRUE) {
+            return 1;
+        }
+        if (value == JsonToken.VALUE_FALSE || value == JsonToken.VALUE_NULL || value == null) {
+            return 0;
+        }
+        skipValue(parser, value);
+        return 0;
+    }
+
+    private static int parseIntText(String text) {
+        if (text == null) {
+            return 0;
+        }
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException ex) {
+            try {
+                return (int) Double.parseDouble(trimmed);
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+    }
+
+    private static void skipValue(JsonParser parser, JsonToken value) throws IOException {
+        if (value != null && value.isStructStart()) {
+            parser.skipChildren();
+        }
     }
 
     private RemoteItem toItem(JsonNode node, String kind) {
