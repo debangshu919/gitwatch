@@ -303,6 +303,105 @@ class NotificationServiceTest {
     }
 
     @Test
+    void throttleSleepBudgetIsSharedAndHandlerWaitStaysInsideThePollInterval() {
+        UUID paced = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                String retryAfter = request.getPath().contains("paced") ? "10" : "600";
+                return new MockResponse().setResponseCode(429).setHeader("Retry-After", retryAfter);
+            }
+        });
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true,
+                server.url("/long").toString(), EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, paced, CHANNEL_ID, "discord", true,
+                server.url("/paced").toString(), EventTypes.ISSUE_OPENED, List.of()));
+
+        DiscordThrottleException ex = assertThrows(DiscordThrottleException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(List.of(Duration.ofSeconds(10), Duration.ofSeconds(10)), sleeper.slept);
+        assertEquals(4, calls.get());
+        assertTrue(dlq.failures.isEmpty());
+        assertEquals(NotificationService.MAX_SLEEP.minus(Duration.ofSeconds(20)), ex.retryAfter());
+        assertFalse(ex.getMessage().contains("http"));
+    }
+
+    @Test
+    void pendingThrottleIsNotDiscardedWhenAnotherTargetCannotBeLogged() {
+        logs.failWrites = true;
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                return new MockResponse().setResponseCode(429).setHeader("Retry-After", "60");
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID,
+                UUID.fromString("44444444-4444-4444-4444-444444444444"),
+                CHANNEL_ID,
+                "discord",
+                true,
+                "not a url",
+                EventTypes.ISSUE_OPENED,
+                List.of()));
+
+        assertThrows(DiscordThrottleException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(1, calls.get());
+        assertTrue(dlq.failures.isEmpty());
+    }
+
+    @Test
+    void deliveryStoreOutageIsNotAcknowledged() {
+        deliveries.failReads = true;
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        DeliveryStoreException ex = assertThrows(DeliveryStoreException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(0, calls.get());
+        assertTrue(logs.entries.isEmpty());
+        assertTrue(dlq.failures.isEmpty());
+        assertFalse(ex.getMessage().contains("http"));
+    }
+
+    @Test
+    void throttleReplayDoesNotPostAgainToATerminalWebhook() {
+        UUID paced = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                if (request.getPath().contains("gone")) {
+                    return new MockResponse().setResponseCode(404);
+                }
+                return new MockResponse().setResponseCode(429).setHeader("Retry-After", "60");
+            }
+        });
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true,
+                server.url("/gone").toString(), EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, paced, CHANNEL_ID, "discord", true,
+                server.url("/paced").toString(), EventTypes.ISSUE_OPENED, List.of()));
+        GitHubEvent event = issue(List.of());
+
+        assertThrows(DiscordThrottleException.class, () -> service.handle(event));
+        assertThrows(DiscordThrottleException.class, () -> service.handle(event));
+
+        assertEquals(3, calls.get());
+        assertEquals(1, dlq.failures.size());
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
+        assertTrue(deliveries.failed.contains(DedupKeys.failedKey(SUBSCRIPTION_ID.toString(), EventTypes.ISSUE_OPENED, 1423)));
+        assertFalse(deliveries.delivered.contains(DedupKeys.deliveredKey(SUBSCRIPTION_ID.toString(), EventTypes.ISSUE_OPENED, 1423)));
+    }
+
+    @Test
     void secondHandleDoesNotPostAgainAfterDiscordAccepted() {
         lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
         GitHubEvent event = issue(List.of());
@@ -539,6 +638,8 @@ class NotificationServiceTest {
 
     private static final class MemoryDeliveries implements DedupStore {
         private final Set<String> delivered = new HashSet<>();
+        private final Set<String> failed = new HashSet<>();
+        private boolean failReads;
 
         @Override
         public boolean tryStart(String owner, String repo, String eventType, int number) {
@@ -562,12 +663,28 @@ class NotificationServiceTest {
 
         @Override
         public boolean alreadyDelivered(String subscriptionId, String eventType, int number) {
+            if (failReads) {
+                throw new IllegalStateException("redis down");
+            }
             return delivered.contains(DedupKeys.deliveredKey(subscriptionId, eventType, number));
         }
 
         @Override
         public void markDelivered(String subscriptionId, String eventType, int number) {
             delivered.add(DedupKeys.deliveredKey(subscriptionId, eventType, number));
+        }
+
+        @Override
+        public boolean alreadyFailed(String subscriptionId, String eventType, int number) {
+            if (failReads) {
+                throw new IllegalStateException("redis down");
+            }
+            return failed.contains(DedupKeys.failedKey(subscriptionId, eventType, number));
+        }
+
+        @Override
+        public void markFailed(String subscriptionId, String eventType, int number) {
+            failed.add(DedupKeys.failedKey(subscriptionId, eventType, number));
         }
     }
 }

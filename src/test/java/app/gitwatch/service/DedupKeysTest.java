@@ -13,6 +13,9 @@ class DedupKeysTest {
         assertEquals(
                 "delivered:22222222-2222-2222-2222-222222222222:issue.opened:1423",
                 DedupKeys.deliveredKey("22222222-2222-2222-2222-222222222222", "issue.opened", 1423));
+        assertEquals(
+                "failed:22222222-2222-2222-2222-222222222222:issue.opened:1423",
+                DedupKeys.failedKey("22222222-2222-2222-2222-222222222222", "issue.opened", 1423));
         assertEquals(Duration.ofDays(30), DedupKeys.TTL);
         assertEquals(Duration.ofMinutes(2), DedupKeys.IN_FLIGHT);
     }

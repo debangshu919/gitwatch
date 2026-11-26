@@ -92,27 +92,39 @@ public class NotificationService {
         List<DeliveryTarget> targets = subscriptions.findActive(event.owner(), event.repo(), event.eventType());
         Duration backoffBudget = MAX_EVENT_BACKOFF;
         RuntimeException unrecorded = null;
+        DeliveryStoreException storeFailure = null;
         DiscordThrottleException throttled = null;
         for (DeliveryTarget target : targets) {
             try {
                 backoffBudget = deliver(target, event, backoffBudget);
             } catch (DiscordThrottleException ex) {
+                // The throw skips the assignment, so keep the budget this target already spent.
+                backoffBudget = ex.remainingBudget();
                 throttled = longer(throttled, ex);
+            } catch (DeliveryStoreException ex) {
+                storeFailure = ex;
             } catch (RuntimeException ex) {
                 log.warn("delivery failed for subscription {}", target.subscriptionId(), ex);
                 try {
                     fail(target, event, ex.getMessage() == null ? "delivery failed" : ex.getMessage());
+                } catch (DeliveryStoreException nested) {
+                    storeFailure = nested;
                 } catch (RuntimeException nested) {
                     log.warn("could not record the failure for subscription {}", target.subscriptionId(), nested);
                     unrecorded = nested;
                 }
             }
         }
+        // A pending throttle must escape even if another target could not be logged.
+        // Otherwise the default handler dead-letters the record and the throttle is dropped.
+        if (throttled != null) {
+            throw withinPollRoom(throttled, backoffBudget);
+        }
+        if (storeFailure != null) {
+            throw storeFailure;
+        }
         if (unrecorded != null) {
             throw unrecorded;
-        }
-        if (throttled != null) {
-            throw throttled;
         }
     }
 
@@ -126,8 +138,9 @@ public class NotificationService {
             }
             return backoffBudget;
         }
-        // Publish-side dedup does not cover a redelivery after Discord accepted.
-        if (deliveries.alreadyDelivered(target.subscriptionId().toString(), event.eventType(), event.number())) {
+        // A throttle replay must not post again to a webhook Discord already accepted,
+        // or to one we already failed for good. A store outage is not a delivery failure.
+        if (settled(target, event)) {
             return backoffBudget;
         }
         String content = DiscordMessageFormatter.format(event);
@@ -138,7 +151,7 @@ public class NotificationService {
             last = discord.post(target.webhookUrl(), content);
             if (last.succeeded()) {
                 // Set only after a 2xx. A 429 must not set the key, or the retry would skip the post.
-                deliveries.markDelivered(target.subscriptionId().toString(), event.eventType(), event.number());
+                rememberDelivered(target, event);
                 logs.append(logEntry(target, event, NotificationLog.SUCCESS, null));
                 return backoffBudget;
             }
@@ -185,7 +198,56 @@ public class NotificationService {
         if (delay.compareTo(room) > 0) {
             delay = room;
         }
-        return new DiscordThrottleException(delay);
+        return new DiscordThrottleException(delay, remaining);
+    }
+
+    private DiscordThrottleException withinPollRoom(DiscordThrottleException throttled, Duration budget) {
+        Duration remaining = budget == null ? Duration.ZERO : budget;
+        Duration spent = MAX_EVENT_BACKOFF.minus(remaining);
+        if (spent.isNegative()) {
+            spent = Duration.ZERO;
+        }
+        Duration room = MAX_SLEEP.minus(spent);
+        if (room.isNegative()) {
+            room = Duration.ZERO;
+        }
+        Duration delay = throttled.retryAfter();
+        if (delay.compareTo(room) > 0) {
+            delay = room;
+        }
+        return new DiscordThrottleException(delay, remaining);
+    }
+
+    private boolean settled(DeliveryTarget target, GitHubEvent event) {
+        String subscriptionId = target.subscriptionId().toString();
+        try {
+            return deliveries.alreadyDelivered(subscriptionId, event.eventType(), event.number())
+                    || deliveries.alreadyFailed(subscriptionId, event.eventType(), event.number());
+        } catch (DeliveryStoreException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new DeliveryStoreException(ex);
+        }
+    }
+
+    private void rememberDelivered(DeliveryTarget target, GitHubEvent event) {
+        try {
+            deliveries.markDelivered(target.subscriptionId().toString(), event.eventType(), event.number());
+        } catch (DeliveryStoreException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new DeliveryStoreException(ex);
+        }
+    }
+
+    private void rememberFailed(DeliveryTarget target, GitHubEvent event) {
+        try {
+            deliveries.markFailed(target.subscriptionId().toString(), event.eventType(), event.number());
+        } catch (DeliveryStoreException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new DeliveryStoreException(ex);
+        }
     }
 
     private static DiscordThrottleException longer(DiscordThrottleException current, DiscordThrottleException next) {
@@ -205,6 +267,9 @@ public class NotificationService {
     private void fail(DeliveryTarget target, GitHubEvent event, String error) {
         logs.append(logEntry(target, event, NotificationLog.FAILED, error));
         dlq.publish(new DeliveryFailure(event, target.subscriptionId().toString(), error, clock.instant()));
+        // Checkpoint only after the failure is recorded. A throttle replay then skips this
+        // webhook. This is not the delivered key: that is only set after a 2xx.
+        rememberFailed(target, event);
     }
 
     private NotificationLog logEntry(DeliveryTarget target, GitHubEvent event, String status, String error) {

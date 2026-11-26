@@ -465,6 +465,16 @@ class RepoPollerTest {
             keys.put(DedupKeys.deliveredKey(subscriptionId, eventType, number), "1");
         }
 
+        @Override
+        public boolean alreadyFailed(String subscriptionId, String eventType, int number) {
+            return keys.containsKey(DedupKeys.failedKey(subscriptionId, eventType, number));
+        }
+
+        @Override
+        public void markFailed(String subscriptionId, String eventType, int number) {
+            keys.put(DedupKeys.failedKey(subscriptionId, eventType, number), "1");
+        }
+
         boolean claimed(String key) {
             return DedupKeys.COMPLETED_VALUE.equals(keys.get(key));
         }

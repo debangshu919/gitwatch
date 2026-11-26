@@ -13,4 +13,8 @@ public interface DedupStore {
     boolean alreadyDelivered(String subscriptionId, String eventType, int number);
 
     void markDelivered(String subscriptionId, String eventType, int number);
+
+    boolean alreadyFailed(String subscriptionId, String eventType, int number);
+
+    void markFailed(String subscriptionId, String eventType, int number);
 }
