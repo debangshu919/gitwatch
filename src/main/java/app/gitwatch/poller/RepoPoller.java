@@ -67,13 +67,7 @@ public class RepoPoller {
                 pollOne(target, now);
             } catch (RuntimeException ex) {
                 log.warn("poll failed for {}/{}", target.owner(), target.repo());
-                store.saveCursors(
-                        target.owner(),
-                        target.repo(),
-                        target.lastIssueNumber(),
-                        target.lastPrNumber(),
-                        target.lastPolledAt(),
-                        now.plus(nextPollDelay));
+                store.save(target.schedule(target.lastPolledAt(), now.plus(nextPollDelay)));
             }
         }
     }
@@ -81,57 +75,49 @@ public class RepoPoller {
     void pollOne(PollTarget target, Instant now) {
         FetchResult issues;
         try {
-            issues = fetch(target.owner(), target.repo(), target.lastIssueNumber(), true);
+            issues = fetch(target.owner(), target.repo(), target.lastIssueNumber(), target.issuePage(), target.issueHighWater(), true);
         } catch (GitHubRateLimitException ex) {
             delay(target, ex.retryAt());
             return;
         }
         if (issues.rateLimited()) {
             publishAll(issues.events());
-            Integer issueCursor = issues.advance() ? issues.cursor() : target.lastIssueNumber();
-            store.saveCursors(
-                    target.owner(),
-                    target.repo(),
-                    issueCursor,
-                    target.lastPrNumber(),
-                    now,
-                    delayUntil(now, issues));
+            store.save(progress(target, issues, null, now, delayUntil(now, issues)));
             return;
         }
         FetchResult pulls;
         try {
-            pulls = fetch(target.owner(), target.repo(), target.lastPrNumber(), false);
+            pulls = fetch(target.owner(), target.repo(), target.lastPrNumber(), target.prPage(), target.prHighWater(), false);
         } catch (GitHubRateLimitException ex) {
             publishAll(issues.events());
-            Integer issueCursor = issues.advance() ? issues.cursor() : target.lastIssueNumber();
-            store.saveCursors(
-                    target.owner(),
-                    target.repo(),
-                    issueCursor,
-                    target.lastPrNumber(),
-                    now,
-                    ex.retryAt());
+            store.save(progress(target, issues, null, now, ex.retryAt()));
             return;
         }
         publishAll(issues.events());
         publishAll(pulls.events());
-        Integer issueCursor = issues.advance() ? issues.cursor() : target.lastIssueNumber();
-        Integer prCursor = pulls.advance() ? pulls.cursor() : target.lastPrNumber();
         Instant next = now.plus(nextPollDelay);
         if (issues.lowRemaining() || pulls.lowRemaining() || pulls.rateLimited()) {
             next = latest(delayUntil(now, issues), delayUntil(now, pulls));
         }
-        store.saveCursors(target.owner(), target.repo(), issueCursor, prCursor, now, next);
+        store.save(progress(target, issues, pulls, now, next));
+    }
+
+    private PollTarget progress(PollTarget current, FetchResult issues, FetchResult pulls, Instant polledAt, Instant nextPollAt) {
+        return new PollTarget(
+                current.owner(),
+                current.repo(),
+                issues == null ? current.lastIssueNumber() : issues.cursor(),
+                pulls == null ? current.lastPrNumber() : pulls.cursor(),
+                issues == null ? current.issuePage() : issues.nextPage(),
+                pulls == null ? current.prPage() : pulls.nextPage(),
+                issues == null ? current.issueHighWater() : issues.highWater(),
+                pulls == null ? current.prHighWater() : pulls.highWater(),
+                polledAt,
+                nextPollAt);
     }
 
     private void delay(PollTarget target, Instant retryAt) {
-        store.saveCursors(
-                target.owner(),
-                target.repo(),
-                target.lastIssueNumber(),
-                target.lastPrNumber(),
-                target.lastPolledAt(),
-                retryAt);
+        store.save(target.schedule(target.lastPolledAt(), retryAt));
     }
 
     private Instant delayUntil(Instant now, FetchResult result) {
@@ -145,25 +131,23 @@ public class RepoPoller {
         return left.isAfter(right) ? left : right;
     }
 
-    private FetchResult fetch(String owner, String repo, Integer lastSeen, boolean issues) {
+    private FetchResult fetch(String owner, String repo, Integer lastSeen, int startPage, Integer highWater, boolean issues) {
         if (lastSeen == null) {
             return baseline(owner, repo, issues);
         }
         int cursor = lastSeen;
         int highest = cursor;
+        int page = Math.max(1, startPage);
         boolean reached = false;
-        boolean rateLimited = false;
         boolean lowRemaining = false;
         Instant delayUntil = null;
         List<GitHubEvent> events = new ArrayList<>();
-        int page = 1;
-        while (page <= maxPages) {
+        for (int read = 0; read < maxPages; read++) {
             GitHubPage result;
             try {
                 result = issues ? github.listIssues(owner, repo, page) : github.listPulls(owner, repo, page);
             } catch (GitHubRateLimitException ex) {
-                events.sort(Comparator.comparingInt(GitHubEvent::number));
-                return new FetchResult(events, cursor, false, true, true, ex.retryAt());
+                return finish(events, cursor, page, remember(highWater, highest, cursor), true, true, ex.retryAt());
             }
             if (result.lowRemaining()) {
                 lowRemaining = true;
@@ -188,16 +172,25 @@ public class RepoPoller {
                 reached = true;
                 break;
             }
+            page++;
             if (lowRemaining) {
                 break;
             }
-            page++;
         }
-        events.sort(Comparator.comparingInt(GitHubEvent::number));
+        Integer remembered = remember(highWater, highest, cursor);
         if (reached) {
-            return new FetchResult(events, Math.max(cursor, highest), true, rateLimited, lowRemaining, delayUntil);
+            int caughtUp = remembered == null ? cursor : Math.max(cursor, remembered);
+            return finish(events, caughtUp, 1, null, false, lowRemaining, delayUntil);
         }
-        return new FetchResult(events, cursor, false, rateLimited, lowRemaining, delayUntil);
+        return finish(events, cursor, page, remembered, false, lowRemaining, delayUntil);
+    }
+
+    private Integer remember(Integer highWater, int highest, int cursor) {
+        int value = highWater == null ? highest : Math.max(highest, highWater);
+        if (highWater == null && value == cursor) {
+            return null;
+        }
+        return value;
     }
 
     private FetchResult baseline(String owner, String repo, boolean issues) {
@@ -206,7 +199,7 @@ public class RepoPoller {
         for (RemoteItem item : page.items()) {
             high = Math.max(high, item.number());
         }
-        return new FetchResult(List.of(), high, true, false, page.lowRemaining(), page.lowRemaining() ? page.resetAt() : null);
+        return new FetchResult(List.of(), high, 1, null, false, page.lowRemaining(), page.lowRemaining() ? page.resetAt() : null);
     }
 
     private GitHubEvent toEvent(String owner, String repo, RemoteItem item, boolean issue) {
@@ -244,10 +237,23 @@ public class RepoPoller {
         }
     }
 
+    private FetchResult finish(
+            List<GitHubEvent> events,
+            Integer cursor,
+            int nextPage,
+            Integer highWater,
+            boolean rateLimited,
+            boolean lowRemaining,
+            Instant delayUntil) {
+        events.sort(Comparator.comparingInt(GitHubEvent::number));
+        return new FetchResult(events, cursor, nextPage, highWater, rateLimited, lowRemaining, delayUntil);
+    }
+
     private record FetchResult(
             List<GitHubEvent> events,
             Integer cursor,
-            boolean advance,
+            int nextPage,
+            Integer highWater,
             boolean rateLimited,
             boolean lowRemaining,
             Instant delayUntil) {

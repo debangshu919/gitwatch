@@ -19,6 +19,18 @@ public class RepoPollState {
     @Column(name = "last_pr_number")
     private Integer lastPrNumber;
 
+    @Column(name = "issue_page", nullable = false)
+    private int issuePage = 1;
+
+    @Column(name = "pr_page", nullable = false)
+    private int prPage = 1;
+
+    @Column(name = "issue_high_water")
+    private Integer issueHighWater;
+
+    @Column(name = "pr_high_water")
+    private Integer prHighWater;
+
     @Column(name = "last_polled_at")
     private Instant lastPolledAt;
 
@@ -47,6 +59,38 @@ public class RepoPollState {
 
     public void setLastPrNumber(Integer lastPrNumber) {
         this.lastPrNumber = lastPrNumber;
+    }
+
+    public int getIssuePage() {
+        return issuePage;
+    }
+
+    public void setIssuePage(int issuePage) {
+        this.issuePage = issuePage;
+    }
+
+    public int getPrPage() {
+        return prPage;
+    }
+
+    public void setPrPage(int prPage) {
+        this.prPage = prPage;
+    }
+
+    public Integer getIssueHighWater() {
+        return issueHighWater;
+    }
+
+    public void setIssueHighWater(Integer issueHighWater) {
+        this.issueHighWater = issueHighWater;
+    }
+
+    public Integer getPrHighWater() {
+        return prHighWater;
+    }
+
+    public void setPrHighWater(Integer prHighWater) {
+        this.prHighWater = prHighWater;
     }
 
     public Instant getLastPolledAt() {

@@ -23,8 +23,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -196,6 +198,37 @@ class RepoPollerTest {
     }
 
     @Test
+    void backlogLargerThanMaxPagesIsPublishedOnLaterPolls() throws Exception {
+        poller = poller(2, 1);
+        store.put(due(10, 10));
+        int[][] pages = {{16, 15}, {14, 13}, {12, 11}, {10, 9}};
+
+        for (int i = 0; i < pages.length; i++) {
+            enqueueIssues(issue(pages[i][0], "title", "username", "body"), issue(pages[i][1], "title", "username", "body"));
+            enqueuePulls("[]");
+            assertEquals(i + 1, pollIssuesPage());
+            Mutable state = store.get("apache", "iggy");
+            if (i < pages.length - 1) {
+                assertEquals(10, state.lastIssueNumber);
+                assertEquals(i + 2, state.issuePage);
+                assertEquals(16, state.issueHighWater);
+            } else {
+                assertEquals(16, state.lastIssueNumber);
+                assertEquals(1, state.issuePage);
+                assertNull(state.issueHighWater);
+            }
+        }
+
+        assertEquals(List.of(15, 16, 13, 14, 11, 12), publisher.events.stream().map(GitHubEvent::number).toList());
+
+        enqueueIssues(issue(17, "title", "username", "body"), issue(16, "title", "username", "body"));
+        enqueuePulls("[]");
+        assertEquals(1, pollIssuesPage());
+        assertEquals(17, store.get("apache", "iggy").lastIssueNumber);
+        assertEquals(List.of(15, 16, 13, 14, 11, 12, 17), publisher.events.stream().map(GitHubEvent::number).toList());
+    }
+
+    @Test
     void bodyExcerptIsTruncatedTo200Characters() {
         String body = "x".repeat(250);
         assertEquals(200, RepoPoller.excerpt(body).length());
@@ -252,6 +285,44 @@ class RepoPollerTest {
         return new PollTarget("apache", "iggy", issueNumber, prNumber, null, NOW);
     }
 
+    private RepoPoller poller(int pageSize, int maxPages) {
+        AppProperties properties = new AppProperties();
+        properties.getGithub().setApiBase(server.url("/").toString());
+        properties.getGithub().setToken("");
+        properties.getGithub().setMinRemaining(10);
+        properties.getGithub().setRateLimitDelay(Duration.ofMinutes(15));
+        properties.getNotifier().setTimeout(Duration.ofSeconds(2));
+        properties.getPoller().setPageSize(pageSize);
+        properties.getPoller().setMaxPages(maxPages);
+        properties.getPoller().setBatchSize(10);
+        properties.getPoller().setNextPollDelay(Duration.ofMinutes(3));
+        properties.getPoller().setLease(Duration.ofMinutes(5));
+        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+        GitHubClient github = new GitHubClient(http, mapper, Clock.fixed(NOW, ZoneOffset.UTC), properties);
+        return new RepoPoller(store, github, dedup, publisher, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private int pollIssuesPage() throws Exception {
+        poller.poll();
+        RecordedRequest issues = server.takeRequest(2, TimeUnit.SECONDS);
+        RecordedRequest pulls = server.takeRequest(2, TimeUnit.SECONDS);
+        assertTrue(issues != null && issues.getPath().contains("/issues?"));
+        assertTrue(pulls != null && pulls.getPath().contains("/pulls?"));
+        assertEquals(1, queryPage(pulls.getPath()));
+        store.get("apache", "iggy").nextPollAt = NOW;
+        return queryPage(issues.getPath());
+    }
+
+    private static int queryPage(String path) {
+        String key = "&page=";
+        int start = path.indexOf(key);
+        assertTrue(start >= 0, path);
+        start += key.length();
+        int end = path.indexOf('&', start);
+        String value = end < 0 ? path.substring(start) : path.substring(start, end);
+        return Integer.parseInt(value);
+    }
+
     private static final class MemoryPollStateStore implements PollStateStore {
         private final Map<String, Mutable> states = new LinkedHashMap<>();
 
@@ -279,12 +350,16 @@ class RepoPollerTest {
         }
 
         @Override
-        public void saveCursors(String owner, String repo, Integer lastIssueNumber, Integer lastPrNumber, Instant lastPolledAt, Instant nextPollAt) {
-            Mutable state = states.get(owner + "/" + repo);
-            state.lastIssueNumber = lastIssueNumber;
-            state.lastPrNumber = lastPrNumber;
-            state.lastPolledAt = lastPolledAt;
-            state.nextPollAt = nextPollAt;
+        public void save(PollTarget target) {
+            Mutable state = states.get(target.owner() + "/" + target.repo());
+            state.lastIssueNumber = target.lastIssueNumber();
+            state.lastPrNumber = target.lastPrNumber();
+            state.issuePage = target.issuePage();
+            state.prPage = target.prPage();
+            state.issueHighWater = target.issueHighWater();
+            state.prHighWater = target.prHighWater();
+            state.lastPolledAt = target.lastPolledAt();
+            state.nextPollAt = target.nextPollAt();
         }
     }
 
@@ -293,6 +368,10 @@ class RepoPollerTest {
         String repo;
         Integer lastIssueNumber;
         Integer lastPrNumber;
+        int issuePage = 1;
+        int prPage = 1;
+        Integer issueHighWater;
+        Integer prHighWater;
         Instant lastPolledAt;
         Instant nextPollAt;
 
@@ -302,13 +381,27 @@ class RepoPollerTest {
             state.repo = target.repo();
             state.lastIssueNumber = target.lastIssueNumber();
             state.lastPrNumber = target.lastPrNumber();
+            state.issuePage = target.issuePage();
+            state.prPage = target.prPage();
+            state.issueHighWater = target.issueHighWater();
+            state.prHighWater = target.prHighWater();
             state.lastPolledAt = target.lastPolledAt();
             state.nextPollAt = target.nextPollAt();
             return state;
         }
 
         PollTarget snapshot() {
-            return new PollTarget(owner, repo, lastIssueNumber, lastPrNumber, lastPolledAt, nextPollAt);
+            return new PollTarget(
+                    owner,
+                    repo,
+                    lastIssueNumber,
+                    lastPrNumber,
+                    issuePage,
+                    prPage,
+                    issueHighWater,
+                    prHighWater,
+                    lastPolledAt,
+                    nextPollAt);
         }
     }
 

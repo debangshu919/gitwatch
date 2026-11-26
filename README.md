@@ -90,7 +90,7 @@ Replace the example webhook with a real Discord webhook in the database only thr
 2. `GET /repos/{owner}/{repo}/issues` and `GET /repos/{owner}/{repo}/pulls`, newest first.
 3. The issues list also returns pull requests. Those are not emitted as `issue.opened`.
 4. Skip numbers already stored in Redis at `dedup:{owner}/{repo}:{event_type}:{number}` (30 day TTL).
-5. Publish to `github.events`, then move the cursor and set `next_poll_at` about 3 minutes ahead.
+5. Publish to `github.events`, then move the cursor and set `next_poll_at` about 3 minutes ahead. If more results sit above the cursor than `gitwatch.poller.max-pages` can read, that poll publishes the pages it fetched and the next poll continues at the following GitHub page. The cursor advances once a later page reaches it. Items opened during that catch-up are published on the poll that returns to page 1.
 6. On HTTP 429, or when `X-RateLimit-Remaining` is below 10, set `next_poll_at` from `Retry-After` or the rate-limit reset instead of polling again immediately. A 403 whose body says rate limit is treated the same way.
 
 Kafka payload:

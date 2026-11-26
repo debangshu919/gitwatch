@@ -3,7 +3,6 @@ package app.gitwatch.notifier;
 import app.gitwatch.config.KafkaTopics;
 import app.gitwatch.config.TopicSender;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,13 +18,15 @@ public class KafkaDlqPublisher implements DlqPublisher {
 
     @Override
     public void publish(DeliveryFailure failure) {
-        ObjectNode node = mapper.createObjectNode();
-        node.set("event", mapper.valueToTree(failure.event()));
-        node.put("subscription_id", failure.subscriptionId());
-        node.put("error", failure.error());
-        node.put("failed_at", failure.failedAt().toString());
+        String body = DlqEnvelope.write(
+                mapper,
+                failure.event(),
+                null,
+                failure.subscriptionId(),
+                failure.error(),
+                failure.failedAt());
         try {
-            sender.send(KafkaTopics.NOTIFICATIONS_DLQ, failure.subscriptionId(), mapper.writeValueAsString(node));
+            sender.send(KafkaTopics.NOTIFICATIONS_DLQ, failure.subscriptionId(), body);
         } catch (RuntimeException ex) {
             throw ex;
         } catch (Exception ex) {

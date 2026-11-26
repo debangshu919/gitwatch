@@ -213,6 +213,75 @@ class NotificationServiceTest {
     }
 
     @Test
+    void oneInvalidWebhookDoesNotBlockOtherSubscribers() {
+        UUID otherSubscription = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID,
+                otherSubscription,
+                CHANNEL_ID,
+                "discord",
+                true,
+                server.url("/webhook").toString(),
+                EventTypes.ISSUE_OPENED,
+                List.of()));
+
+        service.handle(issue(List.of()));
+
+        assertEquals(1, calls.get());
+        assertEquals(2, logs.entries.size());
+        assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
+        assertEquals(SUBSCRIPTION_ID.toString(), logs.entries.get(0).getSubscriptionId());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(1).getStatus());
+        assertEquals(otherSubscription.toString(), logs.entries.get(1).getSubscriptionId());
+        assertEquals(1, dlq.failures.size());
+    }
+
+    @Test
+    void thrownDeliveryDoesNotBlockTheNextSubscriber() {
+        DiscordClient discord = new DiscordClient(
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build(), mapper, Duration.ofSeconds(2)) {
+            @Override
+            public DiscordResponse post(String webhookUrl, String content) {
+                if (webhookUrl.contains("bad.example")) {
+                    throw new IllegalStateException("channel config is not readable");
+                }
+                return super.post(webhookUrl, content);
+            }
+        };
+        service = new NotificationService(
+                lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
+        UUID otherSubscription = UUID.fromString("55555555-5555-5555-5555-555555555555");
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID,
+                SUBSCRIPTION_ID,
+                CHANNEL_ID,
+                "discord",
+                true,
+                "https://bad.example/hook",
+                EventTypes.ISSUE_OPENED,
+                List.of()));
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID,
+                otherSubscription,
+                CHANNEL_ID,
+                "discord",
+                true,
+                server.url("/webhook").toString(),
+                EventTypes.ISSUE_OPENED,
+                List.of()));
+
+        service.handle(issue(List.of()));
+
+        assertEquals(1, calls.get());
+        assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
+        assertEquals("channel config is not readable", logs.entries.get(0).getError());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(1).getStatus());
+        assertEquals(otherSubscription.toString(), logs.entries.get(1).getSubscriptionId());
+    }
+
+    @Test
     void invalidWebhookIsPermanentAndDoesNotCallDiscord() {
         lookup.targets.add(new DeliveryTarget(
                 USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));

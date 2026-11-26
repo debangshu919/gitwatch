@@ -36,17 +36,15 @@ public class JpaPollStateStore implements PollStateStore {
 
     @Override
     @Transactional
-    public void saveCursors(
-            String owner,
-            String repo,
-            Integer lastIssueNumber,
-            Integer lastPrNumber,
-            Instant lastPolledAt,
-            Instant nextPollAt) {
-        RepoPollState state = repository.findById(new RepoPollStateId(owner, repo)).orElseThrow();
-        state.setLastIssueNumber(lastIssueNumber);
-        state.setLastPrNumber(lastPrNumber);
-        state.setLastPolledAt(lastPolledAt);
-        state.setNextPollAt(nextPollAt);
+    public void save(PollTarget target) {
+        RepoPollState state = repository.findById(new RepoPollStateId(target.owner(), target.repo())).orElseThrow();
+        state.setLastIssueNumber(target.lastIssueNumber());
+        state.setLastPrNumber(target.lastPrNumber());
+        state.setIssuePage(target.issuePage());
+        state.setPrPage(target.prPage());
+        state.setIssueHighWater(target.issueHighWater());
+        state.setPrHighWater(target.prHighWater());
+        state.setLastPolledAt(target.lastPolledAt());
+        state.setNextPollAt(target.nextPollAt());
     }
 }

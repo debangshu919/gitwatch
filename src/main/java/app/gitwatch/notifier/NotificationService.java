@@ -62,7 +62,16 @@ public class NotificationService {
     public void handle(GitHubEvent event) {
         List<DeliveryTarget> targets = subscriptions.findActive(event.owner(), event.repo(), event.eventType());
         for (DeliveryTarget target : targets) {
-            deliver(target, event);
+            try {
+                deliver(target, event);
+            } catch (RuntimeException ex) {
+                log.warn("delivery failed for subscription {}", target.subscriptionId(), ex);
+                try {
+                    fail(target, event, ex.getMessage() == null ? "delivery failed" : ex.getMessage());
+                } catch (RuntimeException nested) {
+                    log.warn("could not record the failure for subscription {}", target.subscriptionId(), nested);
+                }
+            }
         }
     }
 
