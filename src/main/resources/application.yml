@@ -48,9 +48,22 @@ spring:
 
 server:
   port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
 
 gitwatch:
   encryption-key: ${GITWATCH_ENCRYPTION_KEY:}
+  jwt-secret: ${GITWATCH_JWT_SECRET:}
+  jwt-expiry: 7d
+  oauth:
+    client-id: ${GITHUB_OAUTH_CLIENT_ID:}
+    client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+    redirect-uri: ${GITHUB_OAUTH_REDIRECT_URI:}
+  rate-limit:
+    auth-per-minute: 10
+    user-per-minute: 100
   github:
     token: ${GITHUB_TOKEN:}
     api-base: ${GITHUB_API_BASE:https://api.github.com}
