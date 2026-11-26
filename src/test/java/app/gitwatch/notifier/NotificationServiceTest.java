@@ -23,6 +23,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -399,6 +400,18 @@ class NotificationServiceTest {
         assertEquals(NotificationLog.FAILED, logs.entries.get(0).getStatus());
         assertTrue(deliveries.failed.contains(DedupKeys.failedKey(SUBSCRIPTION_ID.toString(), EventTypes.ISSUE_OPENED, 1423)));
         assertFalse(deliveries.delivered.contains(DedupKeys.deliveredKey(SUBSCRIPTION_ID.toString(), EventTypes.ISSUE_OPENED, 1423)));
+    }
+
+    @Test
+    void localSettledKeysDoNotGrowPastTheCap() {
+        Map<String, Boolean> keys = NotificationService.newSettledKeys();
+        int extra = 10;
+        for (int i = 0; i < NotificationService.LOCAL_SETTLED_CAP + extra; i++) {
+            keys.put("k" + i, Boolean.TRUE);
+        }
+        assertEquals(NotificationService.LOCAL_SETTLED_CAP, keys.size());
+        assertTrue(keys.containsKey("k" + (NotificationService.LOCAL_SETTLED_CAP + extra - 1)));
+        assertFalse(keys.containsKey("k0"));
     }
 
     @Test

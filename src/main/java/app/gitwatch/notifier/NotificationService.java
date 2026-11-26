@@ -11,10 +11,11 @@ import app.gitwatch.service.LabelFilter;
 import app.gitwatch.service.SubscriptionLookup;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +45,10 @@ public class NotificationService {
     private final NotificationLogStore logs;
     private final DlqPublisher dlq;
     private final DedupStore deliveries;
-    private final Set<String> settledLocally = ConcurrentHashMap.newKeySet();
+    // Same-process guard for a replay before Redis is readable again, not a second 30-day store.
+    // Redis keeps the durable record. The cap drops the oldest key so this set cannot grow for the life of the process.
+    static final int LOCAL_SETTLED_CAP = 4096;
+    private final Map<String, Boolean> settledLocally = newSettledKeys();
     private final Clock clock;
     private final Sleeper sleeper;
     private final int maxAttempts;
@@ -226,7 +230,7 @@ public class NotificationService {
         String subscriptionId = target.subscriptionId().toString();
         String delivered = DedupKeys.deliveredKey(subscriptionId, event.eventType(), event.number());
         String failed = DedupKeys.failedKey(subscriptionId, event.eventType(), event.number());
-        if (settledLocally.contains(delivered) || settledLocally.contains(failed)) {
+        if (settledLocally.containsKey(delivered) || settledLocally.containsKey(failed)) {
             return true;
         }
         try {
@@ -244,23 +248,36 @@ public class NotificationService {
                 target.subscriptionId().toString(), event.eventType(), event.number());
         // Discord already accepted. Remember here before the Redis write so a replay in this
         // process does not post again when that write fails.
-        settledLocally.add(key);
+        rememberLocally(key);
         try {
             deliveries.markDelivered(target.subscriptionId().toString(), event.eventType(), event.number());
         } catch (RuntimeException ex) {
-            log.warn("could not record delivery for subscription {}", target.subscriptionId());
+            log.warn("could not record delivery for subscription {}", target.subscriptionId(), ex);
         }
     }
 
     private void rememberFailed(DeliveryTarget target, GitHubEvent event) {
         String key = DedupKeys.failedKey(
                 target.subscriptionId().toString(), event.eventType(), event.number());
-        settledLocally.add(key);
+        rememberLocally(key);
         try {
             deliveries.markFailed(target.subscriptionId().toString(), event.eventType(), event.number());
         } catch (RuntimeException ex) {
-            log.warn("could not record a terminal delivery for subscription {}", target.subscriptionId());
+            log.warn("could not record a terminal delivery for subscription {}", target.subscriptionId(), ex);
         }
+    }
+
+    private void rememberLocally(String key) {
+        settledLocally.put(key, Boolean.TRUE);
+    }
+
+    static Map<String, Boolean> newSettledKeys() {
+        return Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, false) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                return size() > LOCAL_SETTLED_CAP;
+            }
+        });
     }
 
     private static DiscordThrottleException longer(DiscordThrottleException current, DiscordThrottleException next) {
