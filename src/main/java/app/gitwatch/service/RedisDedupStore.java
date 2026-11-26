@@ -41,4 +41,30 @@ public class RedisDedupStore implements DedupStore {
             redis.delete(key);
         }
     }
+
+    @Override
+    public boolean alreadyDelivered(String subscriptionId, String eventType, int number) {
+        return Boolean.TRUE.equals(redis.hasKey(DedupKeys.deliveredKey(subscriptionId, eventType, number)));
+    }
+
+    @Override
+    public void markDelivered(String subscriptionId, String eventType, int number) {
+        redis.opsForValue().set(
+                DedupKeys.deliveredKey(subscriptionId, eventType, number),
+                "1",
+                DedupKeys.TTL);
+    }
+
+    @Override
+    public boolean alreadyFailed(String subscriptionId, String eventType, int number) {
+        return Boolean.TRUE.equals(redis.hasKey(DedupKeys.failedKey(subscriptionId, eventType, number)));
+    }
+
+    @Override
+    public void markFailed(String subscriptionId, String eventType, int number) {
+        redis.opsForValue().set(
+                DedupKeys.failedKey(subscriptionId, eventType, number),
+                "1",
+                DedupKeys.TTL);
+    }
 }
