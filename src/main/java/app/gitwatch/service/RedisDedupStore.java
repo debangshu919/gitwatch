@@ -41,4 +41,17 @@ public class RedisDedupStore implements DedupStore {
             redis.delete(key);
         }
     }
+
+    @Override
+    public boolean alreadyDelivered(String subscriptionId, String eventType, int number) {
+        return Boolean.TRUE.equals(redis.hasKey(DedupKeys.deliveredKey(subscriptionId, eventType, number)));
+    }
+
+    @Override
+    public void markDelivered(String subscriptionId, String eventType, int number) {
+        redis.opsForValue().set(
+                DedupKeys.deliveredKey(subscriptionId, eventType, number),
+                "1",
+                DedupKeys.TTL);
+    }
 }

@@ -455,6 +455,16 @@ class RepoPollerTest {
             }
         }
 
+        @Override
+        public boolean alreadyDelivered(String subscriptionId, String eventType, int number) {
+            return keys.containsKey(DedupKeys.deliveredKey(subscriptionId, eventType, number));
+        }
+
+        @Override
+        public void markDelivered(String subscriptionId, String eventType, int number) {
+            keys.put(DedupKeys.deliveredKey(subscriptionId, eventType, number), "1");
+        }
+
         boolean claimed(String key) {
             return DedupKeys.COMPLETED_VALUE.equals(keys.get(key));
         }

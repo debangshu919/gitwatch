@@ -13,4 +13,8 @@ public final class DedupKeys {
     public static String key(String owner, String repo, String eventType, int number) {
         return "dedup:" + owner + "/" + repo + ":" + eventType + ":" + number;
     }
+
+    public static String deliveredKey(String subscriptionId, String eventType, int number) {
+        return "delivered:" + subscriptionId + ":" + eventType + ":" + number;
+    }
 }

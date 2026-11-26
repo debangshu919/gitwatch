@@ -4,12 +4,12 @@ import app.gitwatch.config.AppProperties;
 import app.gitwatch.model.GitHubEvent;
 import app.gitwatch.model.NotificationLog;
 import app.gitwatch.service.ChannelPolicy;
+import app.gitwatch.service.DedupStore;
 import app.gitwatch.service.DeliveryTarget;
 import app.gitwatch.service.LabelFilter;
 import app.gitwatch.service.SubscriptionLookup;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -22,10 +22,25 @@ public class NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
+    // One record's sleeps must not exceed max.poll.interval.ms and force a rebalance.
+    // max-poll-records is 1 for the same reason. A catch-up can emit up to max-pages (5)
+    // times page-size (100) issues plus the same number of pull requests, and three
+    // attempts will not drain that against a webhook limit. Pace this record and leave
+    // the offset uncommitted while Discord is still asking for Retry-After.
+    public static final Duration MAX_EVENT_BACKOFF = Duration.ofSeconds(20);
+
+    // application.yml sets max.poll.interval.ms to 300000. A single sleep must stay under
+    // that minus headroom, or the consumer is removed and the group rebalances. Headroom
+    // covers the 10s HTTP timeout and the commit after the sleep.
+    static final long MAX_POLL_INTERVAL_MS = 300_000L;
+    static final Duration POLL_HEADROOM = Duration.ofSeconds(30);
+    public static final Duration MAX_SLEEP = Duration.ofMillis(MAX_POLL_INTERVAL_MS).minus(POLL_HEADROOM);
+
     private final SubscriptionLookup subscriptions;
     private final DiscordClient discord;
     private final NotificationLogStore logs;
     private final DlqPublisher dlq;
+    private final DedupStore deliveries;
     private final Clock clock;
     private final Sleeper sleeper;
     private final int maxAttempts;
@@ -38,8 +53,18 @@ public class NotificationService {
             NotificationLogStore logs,
             DlqPublisher dlq,
             Clock clock,
+            DedupStore deliveries,
             AppProperties properties) {
-        this(subscriptions, discord, logs, dlq, clock, Sleeper.thread(), properties.getNotifier().getMaxAttempts(), properties.getNotifier().getBackoff());
+        this(
+                subscriptions,
+                discord,
+                logs,
+                dlq,
+                clock,
+                Sleeper.thread(),
+                properties.getNotifier().getMaxAttempts(),
+                properties.getNotifier().getBackoff(),
+                deliveries);
     }
 
     public NotificationService(
@@ -50,26 +75,29 @@ public class NotificationService {
             Clock clock,
             Sleeper sleeper,
             int maxAttempts,
-            Duration backoff) {
+            Duration backoff,
+            DedupStore deliveries) {
         this.subscriptions = subscriptions;
         this.discord = discord;
         this.logs = logs;
         this.dlq = dlq;
+        this.deliveries = deliveries;
         this.clock = clock;
         this.sleeper = sleeper;
         this.maxAttempts = Math.max(1, maxAttempts);
         this.backoff = backoff == null ? Duration.ofSeconds(1) : backoff;
     }
 
-    public static final Duration MAX_EVENT_BACKOFF = Duration.ofSeconds(20);
-
     public void handle(GitHubEvent event) {
         List<DeliveryTarget> targets = subscriptions.findActive(event.owner(), event.repo(), event.eventType());
         Duration backoffBudget = MAX_EVENT_BACKOFF;
         RuntimeException unrecorded = null;
+        DiscordThrottleException throttled = null;
         for (DeliveryTarget target : targets) {
             try {
                 backoffBudget = deliver(target, event, backoffBudget);
+            } catch (DiscordThrottleException ex) {
+                throttled = longer(throttled, ex);
             } catch (RuntimeException ex) {
                 log.warn("delivery failed for subscription {}", target.subscriptionId(), ex);
                 try {
@@ -83,6 +111,9 @@ public class NotificationService {
         if (unrecorded != null) {
             throw unrecorded;
         }
+        if (throttled != null) {
+            throw throttled;
+        }
     }
 
     private Duration deliver(DeliveryTarget target, GitHubEvent event, Duration backoffBudget) {
@@ -95,6 +126,10 @@ public class NotificationService {
             }
             return backoffBudget;
         }
+        // Publish-side dedup does not cover a redelivery after Discord accepted.
+        if (deliveries.alreadyDelivered(target.subscriptionId().toString(), event.eventType(), event.number())) {
+            return backoffBudget;
+        }
         String content = DiscordMessageFormatter.format(event);
         DiscordResponse last = null;
         int attempt = 0;
@@ -102,12 +137,22 @@ public class NotificationService {
             attempt++;
             last = discord.post(target.webhookUrl(), content);
             if (last.succeeded()) {
+                // Set only after a 2xx. A 429 must not set the key, or the retry would skip the post.
+                deliveries.markDelivered(target.subscriptionId().toString(), event.eventType(), event.number());
                 logs.append(logEntry(target, event, NotificationLog.SUCCESS, null));
                 return backoffBudget;
             }
             if (last.permanent()) {
                 fail(target, event, last.error());
                 return backoffBudget;
+            }
+            if (last.throttled()) {
+                Duration delay = retryDelay(last);
+                if (attempt >= maxAttempts || delay.compareTo(backoffBudget) > 0) {
+                    throw throttle(delay, backoffBudget);
+                }
+                backoffBudget = sleep(delay, backoffBudget);
+                continue;
             }
             if (attempt >= maxAttempts) {
                 break;
@@ -116,6 +161,45 @@ public class NotificationService {
         }
         fail(target, event, last == null ? "Discord delivery failed" : last.error());
         return backoffBudget;
+    }
+
+    private Duration retryDelay(DiscordResponse response) {
+        Duration delay = response.retryAfter();
+        if (delay == null || delay.isNegative()) {
+            delay = backoff;
+        }
+        return capSleep(delay);
+    }
+
+    private DiscordThrottleException throttle(Duration retryAfter, Duration budget) {
+        Duration remaining = budget == null ? Duration.ZERO : budget;
+        Duration spent = MAX_EVENT_BACKOFF.minus(remaining);
+        if (spent.isNegative()) {
+            spent = Duration.ZERO;
+        }
+        Duration room = MAX_SLEEP.minus(spent);
+        if (room.isNegative()) {
+            room = Duration.ZERO;
+        }
+        Duration delay = capSleep(retryAfter);
+        if (delay.compareTo(room) > 0) {
+            delay = room;
+        }
+        return new DiscordThrottleException(delay);
+    }
+
+    private static DiscordThrottleException longer(DiscordThrottleException current, DiscordThrottleException next) {
+        if (current == null || next.retryAfter().compareTo(current.retryAfter()) > 0) {
+            return next;
+        }
+        return current;
+    }
+
+    public static Duration capSleep(Duration requested) {
+        if (requested == null || requested.isNegative()) {
+            return Duration.ZERO;
+        }
+        return requested.compareTo(MAX_SLEEP) > 0 ? MAX_SLEEP : requested;
     }
 
     private void fail(DeliveryTarget target, GitHubEvent event, String error) {
@@ -141,7 +225,10 @@ public class NotificationService {
         if (budget == null || budget.isZero() || budget.isNegative()) {
             return Duration.ZERO;
         }
-        Duration step = requested.compareTo(budget) > 0 ? budget : requested;
+        Duration step = capSleep(requested);
+        if (step.compareTo(budget) > 0) {
+            step = budget;
+        }
         try {
             sleeper.sleep(step);
         } catch (InterruptedException ex) {

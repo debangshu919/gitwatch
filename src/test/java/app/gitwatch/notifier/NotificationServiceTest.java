@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import app.gitwatch.model.EventTypes;
 import app.gitwatch.model.GitHubEvent;
 import app.gitwatch.model.NotificationLog;
+import app.gitwatch.service.DedupKeys;
+import app.gitwatch.service.DedupStore;
 import app.gitwatch.service.DeliveryTarget;
 import app.gitwatch.service.SubscriptionLookup;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,7 +21,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import okhttp3.mockwebserver.Dispatcher;
@@ -41,6 +45,7 @@ class NotificationServiceTest {
     private MemoryLookup lookup;
     private MemoryLogs logs;
     private MemoryDlq dlq;
+    private MemoryDeliveries deliveries;
     private RecordingSleeper sleeper;
     private final AtomicInteger calls = new AtomicInteger();
     private final List<String> bodies = new ArrayList<>();
@@ -63,12 +68,16 @@ class NotificationServiceTest {
         lookup = new MemoryLookup();
         logs = new MemoryLogs();
         dlq = new MemoryDlq();
+        deliveries = new MemoryDeliveries();
         sleeper = new RecordingSleeper();
+        Duration backoff = Duration.ofMillis(1);
         DiscordClient discord = new DiscordClient(
                 HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build(),
                 mapper,
-                Duration.ofSeconds(2));
-        service = new NotificationService(lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
+                Duration.ofSeconds(2),
+                backoff);
+        service = new NotificationService(
+                lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, backoff, deliveries);
     }
 
     @AfterEach
@@ -180,6 +189,136 @@ class NotificationServiceTest {
     }
 
     @Test
+    void discord429SleepsRetryAfterAndDoesNotDlqOnFirstResponse() {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                int attempt = calls.incrementAndGet();
+                bodies.add(request.getBody().readUtf8());
+                if (attempt == 1) {
+                    return new MockResponse()
+                            .setResponseCode(429)
+                            .setHeader("Retry-After", "1.5")
+                            .setBody("{\"message\":\"You are being rate limited.\",\"retry_after\":9,\"global\":false}");
+                }
+                return new MockResponse().setResponseCode(204);
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        service.handle(issue(List.of()));
+
+        assertEquals(2, calls.get());
+        assertEquals(List.of(Duration.ofMillis(1500)), sleeper.slept);
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
+        assertNull(logs.entries.get(0).getError());
+        assertTrue(dlq.failures.isEmpty());
+    }
+
+    @Test
+    void discord429UsesJsonRetryAfterWhenHeaderIsMissing() {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                int attempt = calls.incrementAndGet();
+                if (attempt == 1) {
+                    return new MockResponse()
+                            .setResponseCode(429)
+                            .setBody("{\"retry_after\":1.25}");
+                }
+                return new MockResponse().setResponseCode(204);
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        service.handle(issue(List.of()));
+
+        assertEquals(2, calls.get());
+        assertEquals(List.of(Duration.ofMillis(1250)), sleeper.slept);
+        assertTrue(dlq.failures.isEmpty());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
+    }
+
+    @Test
+    void discord429WithoutDelaySleepsNotifierBackoff() {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                int attempt = calls.incrementAndGet();
+                if (attempt == 1) {
+                    return new MockResponse().setResponseCode(429);
+                }
+                return new MockResponse().setResponseCode(204);
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        service.handle(issue(List.of()));
+
+        assertEquals(List.of(Duration.ofMillis(1)), sleeper.slept);
+        assertTrue(dlq.failures.isEmpty());
+    }
+
+    @Test
+    void discord429LongerThanBudgetIsNotFailed() {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                return new MockResponse().setResponseCode(429).setHeader("Retry-After", "60");
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        DiscordThrottleException ex = assertThrows(DiscordThrottleException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(1, calls.get());
+        assertEquals(0, sleeper.calls);
+        assertTrue(logs.entries.isEmpty());
+        assertTrue(dlq.failures.isEmpty());
+        assertEquals(Duration.ofSeconds(60), ex.retryAfter());
+        assertFalse(ex.getMessage().contains("http"));
+        assertFalse(ex.getMessage().contains(server.getHostName()));
+    }
+
+    @Test
+    void discord429DoesNotFailWhenAttemptsAreExhausted() {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                calls.incrementAndGet();
+                return new MockResponse().setResponseCode(429).setHeader("Retry-After", "1");
+            }
+        });
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        DiscordThrottleException ex = assertThrows(DiscordThrottleException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(3, calls.get());
+        assertEquals(List.of(Duration.ofSeconds(1), Duration.ofSeconds(1)), sleeper.slept);
+        assertTrue(logs.entries.isEmpty());
+        assertTrue(dlq.failures.isEmpty());
+        assertEquals(Duration.ofSeconds(1), ex.retryAfter());
+    }
+
+    @Test
+    void secondHandleDoesNotPostAgainAfterDiscordAccepted() {
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+        GitHubEvent event = issue(List.of());
+
+        service.handle(event);
+        service.handle(event);
+
+        assertEquals(1, calls.get());
+        assertEquals(1, logs.entries.size());
+        assertEquals(NotificationLog.SUCCESS, logs.entries.get(0).getStatus());
+        assertTrue(dlq.failures.isEmpty());
+        assertTrue(deliveries.delivered.contains(
+                DedupKeys.deliveredKey(SUBSCRIPTION_ID.toString(), EventTypes.ISSUE_OPENED, 1423)));
+    }
+
+    @Test
     void discord5xxIsRetried() {
         nextStatus = 500;
         server.setDispatcher(new Dispatcher() {
@@ -252,7 +391,7 @@ class NotificationServiceTest {
             }
         };
         service = new NotificationService(
-                lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1));
+                lookup, discord, logs, dlq, Clock.fixed(NOW, ZoneOffset.UTC), sleeper, 3, Duration.ofMillis(1), deliveries);
         UUID otherSubscription = UUID.fromString("55555555-5555-5555-5555-555555555555");
         lookup.targets.add(new DeliveryTarget(
                 USER_ID,
@@ -389,10 +528,46 @@ class NotificationServiceTest {
 
     private static final class RecordingSleeper implements Sleeper {
         private int calls;
+        private final List<Duration> slept = new ArrayList<>();
 
         @Override
         public void sleep(Duration duration) {
             calls++;
+            slept.add(duration);
+        }
+    }
+
+    private static final class MemoryDeliveries implements DedupStore {
+        private final Set<String> delivered = new HashSet<>();
+
+        @Override
+        public boolean tryStart(String owner, String repo, String eventType, int number) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean isCompleted(String owner, String repo, String eventType, int number) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void complete(String owner, String repo, String eventType, int number) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void release(String owner, String repo, String eventType, int number) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean alreadyDelivered(String subscriptionId, String eventType, int number) {
+            return delivered.contains(DedupKeys.deliveredKey(subscriptionId, eventType, number));
+        }
+
+        @Override
+        public void markDelivered(String subscriptionId, String eventType, int number) {
+            delivered.add(DedupKeys.deliveredKey(subscriptionId, eventType, number));
         }
     }
 }

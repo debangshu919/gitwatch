@@ -117,7 +117,7 @@ https://github.com/apache/iggy/issues/1423
 
 Pull requests say `New Pull Request` and use the pull request URL. The Labels line is omitted when there are no labels.
 
-A Discord 4xx or an invalid webhook is logged `failed` in MongoDB collection `notification_logs` and published to `notifications.dlq`. It is not retried. A Discord 5xx or a network error is retried with backoff, at most 3 attempts, then logged `failed` and sent to the DLQ. `notification_logs.created_at` has a 90 day TTL index.
+A Discord 429 is retried. Any other Discord 4xx, or an invalid webhook, is logged `failed` in MongoDB collection `notification_logs` and published to `notifications.dlq`. It is not retried. A Discord 5xx or a network error is retried with backoff, at most 3 attempts, then logged `failed` and sent to the DLQ. `notification_logs.created_at` has a 90 day TTL index.
 
 ## Tests
 

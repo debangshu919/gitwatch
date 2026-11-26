@@ -28,7 +28,7 @@ class NotificationWorkerTest {
         private GitHubEvent event;
 
         CapturingService() {
-            super(null, null, null, null, null, null, 1, null);
+            super(null, null, null, null, null, null, 1, null, null);
         }
 
         @Override
