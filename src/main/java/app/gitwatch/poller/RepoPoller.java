@@ -81,25 +81,55 @@ public class RepoPoller {
             return;
         }
         if (issues.rateLimited()) {
-            publishAll(issues.events());
-            store.save(progress(target, issues, null, now, delayUntil(now, issues)));
+            Integer held = publishAll(issues.events());
+            store.save(hold(target, progress(target, issues, null, now, delayUntil(now, issues)), held, null));
             return;
         }
         FetchResult pulls;
         try {
             pulls = fetch(target.owner(), target.repo(), target.lastPrNumber(), target.prPage(), target.prHighWater(), false);
         } catch (GitHubRateLimitException ex) {
-            publishAll(issues.events());
-            store.save(progress(target, issues, null, now, ex.retryAt()));
+            Integer held = publishAll(issues.events());
+            store.save(hold(target, progress(target, issues, null, now, ex.retryAt()), held, null));
             return;
         }
-        publishAll(issues.events());
-        publishAll(pulls.events());
+        Integer issueHold = publishAll(issues.events());
+        Integer prHold = publishAll(pulls.events());
         Instant next = now.plus(nextPollDelay);
         if (issues.lowRemaining() || pulls.lowRemaining() || pulls.rateLimited()) {
             next = latest(delayUntil(now, issues), delayUntil(now, pulls));
         }
-        store.save(progress(target, issues, pulls, now, next));
+        store.save(hold(target, progress(target, issues, pulls, now, next), issueHold, prHold));
+    }
+
+    private PollTarget hold(PollTarget original, PollTarget saved, Integer issueUnconfirmed, Integer prUnconfirmed) {
+        Integer issueCursor = saved.lastIssueNumber();
+        int issuePage = saved.issuePage();
+        Integer issueHighWater = saved.issueHighWater();
+        if (issueUnconfirmed != null && (issueCursor == null || issueCursor >= issueUnconfirmed)) {
+            issueCursor = original.lastIssueNumber();
+            issuePage = original.issuePage();
+            issueHighWater = original.issueHighWater();
+        }
+        Integer prCursor = saved.lastPrNumber();
+        int prPage = saved.prPage();
+        Integer prHighWater = saved.prHighWater();
+        if (prUnconfirmed != null && (prCursor == null || prCursor >= prUnconfirmed)) {
+            prCursor = original.lastPrNumber();
+            prPage = original.prPage();
+            prHighWater = original.prHighWater();
+        }
+        return new PollTarget(
+                saved.owner(),
+                saved.repo(),
+                issueCursor,
+                prCursor,
+                issuePage,
+                prPage,
+                issueHighWater,
+                prHighWater,
+                saved.lastPolledAt(),
+                saved.nextPollAt());
     }
 
     private PollTarget progress(PollTarget current, FetchResult issues, FetchResult pulls, Instant polledAt, Instant nextPollAt) {
@@ -223,18 +253,29 @@ public class RepoPoller {
         return body.length() <= 200 ? body : body.substring(0, 200);
     }
 
-    private void publishAll(List<GitHubEvent> events) {
+    private Integer publishAll(List<GitHubEvent> events) {
+        Integer unconfirmed = null;
         for (GitHubEvent event : events) {
-            if (!dedup.claim(event.owner(), event.repo(), event.eventType(), event.number())) {
+            if (dedup.isCompleted(event.owner(), event.repo(), event.eventType(), event.number())) {
+                continue;
+            }
+            if (!dedup.tryStart(event.owner(), event.repo(), event.eventType(), event.number())) {
+                unconfirmed = earlier(unconfirmed, event.number());
                 continue;
             }
             try {
                 publisher.publish(event);
+                dedup.complete(event.owner(), event.repo(), event.eventType(), event.number());
             } catch (RuntimeException ex) {
                 dedup.release(event.owner(), event.repo(), event.eventType(), event.number());
                 throw ex;
             }
         }
+        return unconfirmed;
+    }
+
+    private static Integer earlier(Integer current, int number) {
+        return current == null || number < current ? number : current;
     }
 
     private FetchResult finish(

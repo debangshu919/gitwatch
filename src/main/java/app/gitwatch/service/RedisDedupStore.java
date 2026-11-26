@@ -13,13 +13,32 @@ public class RedisDedupStore implements DedupStore {
     }
 
     @Override
-    public boolean claim(String owner, String repo, String eventType, int number) {
-        Boolean stored = redis.opsForValue().setIfAbsent(DedupKeys.key(owner, repo, eventType, number), "1", DedupKeys.TTL);
+    public boolean tryStart(String owner, String repo, String eventType, int number) {
+        Boolean stored = redis.opsForValue().setIfAbsent(
+                DedupKeys.key(owner, repo, eventType, number),
+                DedupKeys.IN_FLIGHT_VALUE,
+                DedupKeys.IN_FLIGHT);
         return Boolean.TRUE.equals(stored);
     }
 
     @Override
+    public boolean isCompleted(String owner, String repo, String eventType, int number) {
+        return DedupKeys.COMPLETED_VALUE.equals(redis.opsForValue().get(DedupKeys.key(owner, repo, eventType, number)));
+    }
+
+    @Override
+    public void complete(String owner, String repo, String eventType, int number) {
+        redis.opsForValue().set(
+                DedupKeys.key(owner, repo, eventType, number),
+                DedupKeys.COMPLETED_VALUE,
+                DedupKeys.TTL);
+    }
+
+    @Override
     public void release(String owner, String repo, String eventType, int number) {
-        redis.delete(DedupKeys.key(owner, repo, eventType, number));
+        String key = DedupKeys.key(owner, repo, eventType, number);
+        if (DedupKeys.IN_FLIGHT_VALUE.equals(redis.opsForValue().get(key))) {
+            redis.delete(key);
+        }
     }
 }

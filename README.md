@@ -103,7 +103,7 @@ Kafka payload:
 
 ## What a delivery does
 
-The worker loads active subscriptions for that repo and event type. Label filters are AND: every required label must be present. An empty filter matches every event of that type. Telegram channels are skipped and never called. A matching Discord webhook receives:
+The worker consumes one record at a time and loads active subscriptions for that repo and event type. Retry sleeps on that record are capped, so a backlog cannot blow Kafka's poll interval and replay the batch. Label filters are AND: every required label must be present. An empty filter matches every event of that type. Telegram channels are skipped and never called. A matching Discord webhook receives:
 
 ```text
 🟢 New Issue in apache/iggy

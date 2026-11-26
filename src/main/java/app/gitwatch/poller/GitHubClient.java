@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -30,6 +31,7 @@ public class GitHubClient {
     private final int pageSize;
     private final Duration timeout;
 
+    @Autowired
     public GitHubClient(HttpClient http, ObjectMapper mapper, Clock clock, AppProperties properties) {
         this(
                 http,

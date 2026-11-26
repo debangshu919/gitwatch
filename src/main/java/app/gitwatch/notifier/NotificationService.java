@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -30,6 +31,7 @@ public class NotificationService {
     private final int maxAttempts;
     private final Duration backoff;
 
+    @Autowired
     public NotificationService(
             SubscriptionLookup subscriptions,
             DiscordClient discord,
@@ -59,38 +61,39 @@ public class NotificationService {
         this.backoff = backoff == null ? Duration.ofSeconds(1) : backoff;
     }
 
+    public static final Duration MAX_EVENT_BACKOFF = Duration.ofSeconds(20);
+
     public void handle(GitHubEvent event) {
         List<DeliveryTarget> targets = subscriptions.findActive(event.owner(), event.repo(), event.eventType());
+        Duration backoffBudget = MAX_EVENT_BACKOFF;
+        RuntimeException unrecorded = null;
         for (DeliveryTarget target : targets) {
             try {
-                deliver(target, event);
+                backoffBudget = deliver(target, event, backoffBudget);
             } catch (RuntimeException ex) {
                 log.warn("delivery failed for subscription {}", target.subscriptionId(), ex);
                 try {
                     fail(target, event, ex.getMessage() == null ? "delivery failed" : ex.getMessage());
                 } catch (RuntimeException nested) {
                     log.warn("could not record the failure for subscription {}", target.subscriptionId(), nested);
+                    unrecorded = nested;
                 }
             }
         }
+        if (unrecorded != null) {
+            throw unrecorded;
+        }
     }
 
-    private void deliver(DeliveryTarget target, GitHubEvent event) {
-        if (!event.eventType().equals(target.eventType())) {
-            return;
-        }
-        if (!target.channelActive()) {
-            return;
-        }
-        if (ChannelPolicy.isTelegram(target.channelType())) {
-            log.info("skipping telegram channel {}", target.channelId());
-            return;
-        }
-        if (!ChannelPolicy.isDiscord(target.channelType())) {
-            return;
-        }
-        if (!LabelFilter.matches(target.requiredLabels(), event.labels())) {
-            return;
+    private Duration deliver(DeliveryTarget target, GitHubEvent event, Duration backoffBudget) {
+        if (!event.eventType().equals(target.eventType())
+                || !target.channelActive()
+                || !ChannelPolicy.isDiscord(target.channelType())
+                || !LabelFilter.matches(target.requiredLabels(), event.labels())) {
+            if (ChannelPolicy.isTelegram(target.channelType())) {
+                log.info("skipping telegram channel {}", target.channelId());
+            }
+            return backoffBudget;
         }
         String content = DiscordMessageFormatter.format(event);
         DiscordResponse last = null;
@@ -100,18 +103,19 @@ public class NotificationService {
             last = discord.post(target.webhookUrl(), content);
             if (last.succeeded()) {
                 logs.append(logEntry(target, event, NotificationLog.SUCCESS, null));
-                return;
+                return backoffBudget;
             }
             if (last.permanent()) {
                 fail(target, event, last.error());
-                return;
+                return backoffBudget;
             }
             if (attempt >= maxAttempts) {
                 break;
             }
-            sleep(backoff.multipliedBy(attempt));
+            backoffBudget = sleep(backoff.multipliedBy(attempt), backoffBudget);
         }
         fail(target, event, last == null ? "Discord delivery failed" : last.error());
+        return backoffBudget;
     }
 
     private void fail(DeliveryTarget target, GitHubEvent event, String error) {
@@ -133,11 +137,16 @@ public class NotificationService {
         return entry;
     }
 
-    private void sleep(Duration duration) {
+    private Duration sleep(Duration requested, Duration budget) {
+        if (budget == null || budget.isZero() || budget.isNegative()) {
+            return Duration.ZERO;
+        }
+        Duration step = requested.compareTo(budget) > 0 ? budget : requested;
         try {
-            sleeper.sleep(duration);
+            sleeper.sleep(step);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
+        return budget.minus(step);
     }
 }

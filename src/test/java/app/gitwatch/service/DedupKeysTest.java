@@ -11,5 +11,6 @@ class DedupKeysTest {
     void keyAndTtlMatchTheContract() {
         assertEquals("dedup:apache/iggy:issue.opened:1423", DedupKeys.key("apache", "iggy", "issue.opened", 1423));
         assertEquals(Duration.ofDays(30), DedupKeys.TTL);
+        assertEquals(Duration.ofMinutes(2), DedupKeys.IN_FLIGHT);
     }
 }

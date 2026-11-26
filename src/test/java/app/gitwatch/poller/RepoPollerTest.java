@@ -229,6 +229,25 @@ class RepoPollerTest {
     }
 
     @Test
+    void publishFailureReleasesInFlightOwnershipAndDoesNotAdvance() throws Exception {
+        store.put(due(1420, 1420));
+        enqueueIssues(issue(1423, "title", "username", "body", "bug"));
+        enqueuePulls("[]");
+        publisher.failNext = true;
+
+        poller.poll();
+
+        assertEquals(1420, store.get("apache", "iggy").lastIssueNumber);
+        assertFalse(dedup.claimed(DedupKeys.key("apache", "iggy", EventTypes.ISSUE_OPENED, 1423)));
+        enqueueIssues(issue(1423, "title", "username", "body", "bug"));
+        enqueuePulls("[]");
+        store.get("apache", "iggy").nextPollAt = NOW;
+        poller.poll();
+        assertEquals(1, publisher.events.size());
+        assertEquals(1423, store.get("apache", "iggy").lastIssueNumber);
+    }
+
+    @Test
     void bodyExcerptIsTruncatedTo200Characters() {
         String body = "x".repeat(250);
         assertEquals(200, RepoPoller.excerpt(body).length());
@@ -406,33 +425,51 @@ class RepoPollerTest {
     }
 
     private static final class MemoryDedupStore implements DedupStore {
-        private final List<String> keys = new ArrayList<>();
+        private final Map<String, String> keys = new LinkedHashMap<>();
 
         @Override
-        public boolean claim(String owner, String repo, String eventType, int number) {
+        public boolean tryStart(String owner, String repo, String eventType, int number) {
             String key = DedupKeys.key(owner, repo, eventType, number);
-            if (keys.contains(key)) {
+            if (keys.containsKey(key)) {
                 return false;
             }
-            keys.add(key);
+            keys.put(key, DedupKeys.IN_FLIGHT_VALUE);
             return true;
         }
 
         @Override
+        public boolean isCompleted(String owner, String repo, String eventType, int number) {
+            return DedupKeys.COMPLETED_VALUE.equals(keys.get(DedupKeys.key(owner, repo, eventType, number)));
+        }
+
+        @Override
+        public void complete(String owner, String repo, String eventType, int number) {
+            keys.put(DedupKeys.key(owner, repo, eventType, number), DedupKeys.COMPLETED_VALUE);
+        }
+
+        @Override
         public void release(String owner, String repo, String eventType, int number) {
-            keys.remove(DedupKeys.key(owner, repo, eventType, number));
+            String key = DedupKeys.key(owner, repo, eventType, number);
+            if (DedupKeys.IN_FLIGHT_VALUE.equals(keys.get(key))) {
+                keys.remove(key);
+            }
         }
 
         boolean claimed(String key) {
-            return keys.contains(key);
+            return DedupKeys.COMPLETED_VALUE.equals(keys.get(key));
         }
     }
 
     private static final class RecordingPublisher implements EventPublisher {
         private final List<GitHubEvent> events = new ArrayList<>();
+        private boolean failNext;
 
         @Override
         public void publish(GitHubEvent event) {
+            if (failNext) {
+                failNext = false;
+                throw new IllegalStateException("kafka down");
+            }
             events.add(event);
         }
     }

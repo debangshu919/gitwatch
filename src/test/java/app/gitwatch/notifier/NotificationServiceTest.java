@@ -3,6 +3,7 @@ package app.gitwatch.notifier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.gitwatch.model.EventTypes;
@@ -282,6 +283,18 @@ class NotificationServiceTest {
     }
 
     @Test
+    void unrecordedFailureIsNotAcknowledged() {
+        logs.failWrites = true;
+        lookup.targets.add(new DeliveryTarget(
+                USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
+        lookup.targets.add(discord(EventTypes.ISSUE_OPENED, List.of()));
+
+        assertThrows(IllegalStateException.class, () -> service.handle(issue(List.of())));
+
+        assertEquals(1, calls.get());
+    }
+
+    @Test
     void invalidWebhookIsPermanentAndDoesNotCallDiscord() {
         lookup.targets.add(new DeliveryTarget(
                 USER_ID, SUBSCRIPTION_ID, CHANNEL_ID, "discord", true, "not a url", EventTypes.ISSUE_OPENED, List.of()));
@@ -354,9 +367,13 @@ class NotificationServiceTest {
 
     private static final class MemoryLogs implements NotificationLogStore {
         private final List<NotificationLog> entries = new ArrayList<>();
+        private boolean failWrites;
 
         @Override
         public void append(NotificationLog log) {
+            if (failWrites && NotificationLog.FAILED.equals(log.getStatus())) {
+                throw new IllegalStateException("mongo down");
+            }
             entries.add(log);
         }
     }
